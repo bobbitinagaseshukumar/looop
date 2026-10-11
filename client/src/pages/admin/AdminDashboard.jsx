@@ -12,7 +12,8 @@ import {
   CheckCircle2,
   Calendar,
   Layers,
-  FileText
+  FileText,
+  RefreshCw
 } from 'lucide-react';
 import adminService from '../../services/adminService';
 import AdminStatCard from '../../components/admin/AdminStatCard';
@@ -93,45 +94,105 @@ export const AdminDashboard = () => {
           </div>
         </div>
 
-        {/* Time Range Selector */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            backgroundColor: '#1e293b',
-            borderRadius: 'var(--radius-sm)',
-            border: '1px solid #334155',
-            padding: '2px'
-          }}
-        >
-          {[
-            { label: '7 Days', val: '7d' },
-            { label: '30 Days', val: '30d' },
-            { label: '90 Days', val: '90d' },
-            { label: '12 Months', val: '12m' },
-            { label: 'All Time', val: 'all' }
-          ].map((tab) => (
-            <button
-              key={tab.val}
-              type="button"
-              onClick={() => setRange(tab.val)}
-              style={{
-                padding: '6px 12px',
-                border: 'none',
-                borderRadius: 'var(--radius-xs)',
-                backgroundColor: range === tab.val ? 'var(--color-primary-600)' : 'transparent',
-                color: range === tab.val ? '#ffffff' : '#94a3b8',
-                fontSize: '0.8rem',
-                fontWeight: range === tab.val ? 600 : 500,
-                cursor: 'pointer',
-                transition: 'all var(--transition-fast)'
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+        {/* Time Range Selector & Sync Controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <button
+            type="button"
+            onClick={() => fetchDashboard(range)}
+            disabled={isLoading}
+            title="Refresh database statistics from Neon PostgreSQL"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '7px 14px',
+              backgroundColor: '#1e293b',
+              color: '#38bdf8',
+              border: '1px solid #334155',
+              borderRadius: 'var(--radius-sm)',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              cursor: isLoading ? 'not-allowed' : 'pointer',
+              transition: 'all var(--transition-fast)'
+            }}
+          >
+            <RefreshCw size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
+            Sync Neon
+          </button>
+
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              backgroundColor: '#1e293b',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid #334155',
+              padding: '2px'
+            }}
+          >
+            {[
+              { label: '7 Days', val: '7d' },
+              { label: '30 Days', val: '30d' },
+              { label: '90 Days', val: '90d' },
+              { label: '12 Months', val: '12m' },
+              { label: 'All Time', val: 'all' }
+            ].map((tab) => (
+              <button
+                key={tab.val}
+                type="button"
+                onClick={() => setRange(tab.val)}
+                style={{
+                  padding: '6px 12px',
+                  border: 'none',
+                  borderRadius: 'var(--radius-xs)',
+                  backgroundColor: range === tab.val ? 'var(--color-primary-600)' : 'transparent',
+                  color: range === tab.val ? '#ffffff' : '#94a3b8',
+                  fontSize: '0.8rem',
+                  fontWeight: range === tab.val ? 600 : 500,
+                  cursor: 'pointer',
+                  transition: 'all var(--transition-fast)'
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {!isLoading && (metrics.totalUsers === 0 || metrics.totalUsers === undefined) && (
+        <div
+          style={{
+            padding: '14px 18px',
+            backgroundColor: 'rgba(56, 189, 248, 0.1)',
+            border: '1px solid rgba(56, 189, 248, 0.3)',
+            borderRadius: 'var(--radius-sm)',
+            color: '#38bdf8',
+            fontSize: '0.875rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            flexWrap: 'wrap'
+          }}
+        >
+          <span>Connecting to Neon PostgreSQL database... Click to refresh live platform records.</span>
+          <button
+            onClick={() => fetchDashboard(range)}
+            style={{
+              padding: '6px 14px',
+              backgroundColor: 'var(--color-primary-600)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: 'var(--radius-xs)',
+              cursor: 'pointer',
+              fontWeight: 600
+            }}
+          >
+            Re-sync Live Data
+          </button>
+        </div>
+      )}
 
       {error && (
         <div

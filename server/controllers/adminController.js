@@ -30,6 +30,9 @@ const DEFAULT_SETTINGS = {
 // -------------------------------------------------------------
 exports.getDashboard = async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     const range = req.query.range || '30d';
     const data = await adminDashboardService.getDashboardOverview(range);
     return res.status(200).json({
@@ -50,6 +53,9 @@ exports.getDashboard = async (req, res) => {
 // -------------------------------------------------------------
 exports.getAnalytics = async (req, res) => {
   try {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
     const range = req.query.range || '30d';
     const data = await adminAnalyticsService.getPlatformAnalytics(range);
     return res.status(200).json({

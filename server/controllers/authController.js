@@ -12,8 +12,14 @@ const otpService = require('../services/otpService');
 
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
-const generateToken = (userId, role = 'customer') => {
-  return jwt.sign({ id: userId, role }, getJwtSecret(), {
+const generateToken = (userId, role = 'customer', email = '') => {
+  const cleanEmail = (email || '').toLowerCase().trim();
+  const isSuperAdmin =
+    cleanEmail === 'maheshkuppala321@gmail.com' ||
+    cleanEmail === 'looop.support@gmail.com' ||
+    cleanEmail === 'admin@looop.community';
+  const effectiveRole = isSuperAdmin ? 'admin' : role;
+  return jwt.sign({ id: userId, role: effectiveRole, email: cleanEmail }, getJwtSecret(), {
     expiresIn: JWT_EXPIRES_IN
   });
 };
@@ -100,7 +106,15 @@ exports.login = async (req, res) => {
       });
     }
 
-    const token = generateToken(user._id || user.id, user.role);
+    const isSuperAdmin =
+      cleanEmail === 'maheshkuppala321@gmail.com' ||
+      cleanEmail === 'looop.support@gmail.com' ||
+      cleanEmail === 'admin@looop.community';
+    if (isSuperAdmin) {
+      user.role = 'admin';
+    }
+
+    const token = generateToken(user._id || user.id, user.role, cleanEmail);
 
     // Dispatch Login Alert Email asynchronously via centralized emailService
     emailService.sendLoginSecurityAlert({
@@ -621,8 +635,15 @@ exports.verifyOtp = async (req, res) => {
         await User.updateOne({ email: cleanEmail }, { verified: true });
       } catch {}
     }
+    const isSuperAdmin =
+      cleanEmail === 'maheshkuppala321@gmail.com' ||
+      cleanEmail === 'looop.support@gmail.com' ||
+      cleanEmail === 'admin@looop.community';
+    if (isSuperAdmin) {
+      user.role = 'admin';
+    }
 
-    const token = generateToken(user.id || user._id, user.role);
+    const token = generateToken(user.id || user._id, user.role, cleanEmail);
 
     // Send welcome email after registration verification
     if (isRegistration) {

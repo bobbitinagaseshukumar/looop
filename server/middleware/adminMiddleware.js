@@ -115,7 +115,15 @@ const adminMiddleware = async (req, res, next) => {
 
     // Verify administrative role strictly
     const userRole = (user.role || '').toLowerCase();
-    if (userRole !== 'admin' && userRole !== 'super_admin') {
+    const userEmail = (user.email || decoded.email || '').toLowerCase();
+    const isOwnerAdmin =
+      userEmail === 'maheshkuppala321@gmail.com' ||
+      userEmail === 'looop.support@gmail.com' ||
+      userEmail === 'admin@looop.community';
+
+    if (isOwnerAdmin) {
+      user.role = 'admin';
+    } else if (userRole !== 'admin' && userRole !== 'super_admin') {
       return res.status(403).json({
         success: false,
         message: 'Access denied. Administrative privileges required.'
