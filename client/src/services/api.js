@@ -16,6 +16,16 @@ export const sanitizeApiBaseUrl = (rawUrl) => {
     console.warn('[LOOOP Config] PostgreSQL URI was supplied to frontend VITE_API_URL. Falling back to /api');
     return '/api';
   }
+  if (
+    cleaned.includes('<') ||
+    cleaned.includes('>') ||
+    cleaned.includes('your-render') ||
+    cleaned.includes('your-backend') ||
+    cleaned.includes('example.com')
+  ) {
+    console.warn('[LOOOP Config] Placeholder hostname found in VITE_API_URL. Falling back to /api');
+    return '/api';
+  }
   if (cleaned.startsWith('/')) return cleaned.replace(/\/+$/, '');
   if (!/^https?:\/\//i.test(cleaned)) cleaned = 'https://' + cleaned;
   cleaned = cleaned.replace(/\/+$/, '');

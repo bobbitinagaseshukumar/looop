@@ -36,8 +36,9 @@ export const AdminLayout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState('');
   const [badgeCounts, setBadgeCounts] = useState({ openReports: 0, pendingRequests: 0, pointsSystem: 'ACTIVE' });
+  const [dbStatus, setDbStatus] = useState('Checking...');
 
-  // Fetch real metrics for sidebar badges
+  // Fetch real metrics for sidebar badges and verify database connectivity
   useEffect(() => {
     let mounted = true;
     const fetchBadges = async () => {
@@ -49,9 +50,14 @@ export const AdminLayout = ({ children }) => {
             pendingRequests: res.data.metrics.pendingRequests || 0,
             pointsSystem: 'ACTIVE'
           });
+          setDbStatus('Connected');
+        } else if (mounted) {
+          setDbStatus('Disconnected');
         }
       } catch (err) {
-        // non-blocking
+        if (mounted) {
+          setDbStatus('Disconnected');
+        }
       }
     };
     fetchBadges();
@@ -381,9 +387,14 @@ export const AdminLayout = ({ children }) => {
 
             {/* Quick System Status Indicator */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.78rem', color: '#94a3b8' }}>
-              <Activity size={14} color="#34d399" />
+              <Activity size={14} color={dbStatus === 'Connected' ? '#34d399' : (dbStatus === 'Checking...' ? '#fbbf24' : '#f87171')} />
               <span className="health-label">Database:</span>
-              <span style={{ color: '#34d399', fontWeight: 700 }}>Connected</span>
+              <span style={{
+                color: dbStatus === 'Connected' ? '#34d399' : (dbStatus === 'Checking...' ? '#fbbf24' : '#f87171'),
+                fontWeight: 700
+              }}>
+                {dbStatus}
+              </span>
             </div>
 
             {/* User Profile Info */}

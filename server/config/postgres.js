@@ -300,6 +300,10 @@ function mockQueryEvaluator(text, params = []) {
  * Execute parameterized SQL query with live DB connection or resilient fallback
  */
 const query = async (text, params = []) => {
+  if (!pool || !isConnected) {
+    await connectPostgres();
+  }
+
   if (pool && isConnected) {
     try {
       const start = Date.now();
@@ -310,14 +314,12 @@ const query = async (text, params = []) => {
       }
       return res;
     } catch (dbErr) {
-      if (dbErr.code === 'ENOTFOUND' || dbErr.code === 'EAI_AGAIN' || dbErr.message.includes('getaddrinfo')) {
-        console.warn('[PostgreSQL Offline Fallback] Network unavailable, using memory query evaluator.');
-        return mockQueryEvaluator(text, params);
-      }
+      console.error('[PostgreSQL Query Error]:', dbErr.message);
       throw dbErr;
     }
   }
 
+  console.warn('[PostgreSQL Pool Notice] Pool offline, evaluating query in memory store.');
   return mockQueryEvaluator(text, params);
 };
 

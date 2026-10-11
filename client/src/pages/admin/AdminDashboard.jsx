@@ -76,21 +76,45 @@ export const AdminDashboard = () => {
             <p style={{ color: '#94a3b8', fontSize: '0.9rem', margin: 0 }}>
               Real-time Neon Database statistics, platform governance, and moderation status.
             </p>
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              backgroundColor: 'rgba(16, 185, 129, 0.15)',
-              color: '#34d399',
-              border: '1px solid rgba(16, 185, 129, 0.3)',
-              borderRadius: '20px',
-              padding: '2px 10px',
-              fontSize: '0.75rem',
-              fontWeight: 600
-            }}>
-              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} />
-              Neon Database Active
-            </span>
+            {data?.metrics ? (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                color: '#34d399',
+                border: '1px solid rgba(16, 185, 129, 0.3)',
+                borderRadius: '20px',
+                padding: '2px 10px',
+                fontSize: '0.75rem',
+                fontWeight: 600
+              }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} />
+                Neon Database Live ({metrics.totalUsers ?? 0} Users)
+              </span>
+            ) : (
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                backgroundColor: error ? 'rgba(239, 68, 68, 0.15)' : 'rgba(251, 191, 36, 0.15)',
+                color: error ? '#f87171' : '#fbbf24',
+                border: `1px solid ${error ? 'rgba(239, 68, 68, 0.3)' : 'rgba(251, 191, 36, 0.3)'}`,
+                borderRadius: '20px',
+                padding: '2px 10px',
+                fontSize: '0.75rem',
+                fontWeight: 600
+              }}>
+                <span style={{
+                  width: '6px',
+                  height: '6px',
+                  borderRadius: '50%',
+                  backgroundColor: error ? '#ef4444' : '#f59e0b',
+                  display: 'inline-block'
+                }} />
+                {isLoading ? 'Connecting to Neon Database...' : 'Neon Connection Failed'}
+              </span>
+            )}
           </div>
         </div>
 

@@ -81,6 +81,10 @@ export const adminService = {
         neonDb.query("SELECT a.*, u.name as admin_name, u.email as admin_email, u.avatar as admin_avatar FROM admin_audit_logs a LEFT JOIN users u ON a.admin_id = u.id ORDER BY a.created_at DESC LIMIT 5;")
       ]);
 
+      if (usersRes?.error || itemsRes?.error) {
+        throw new Error(`Direct Neon database query error: ${usersRes?.error || itemsRes?.error}`);
+      }
+
       const totalUsers = usersRes.rows?.[0]?.count ?? 0;
       const activeUsers = usersActiveRes.rows?.[0]?.count ?? 0;
       const totalItems = itemsRes.rows?.[0]?.count ?? 0;
