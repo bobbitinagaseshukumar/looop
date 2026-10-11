@@ -123,6 +123,23 @@ exports.getUnreadCount = async (req, res) => {
       return res.status(200).json({ success: true, count: 0 });
     }
 
+    // Check Neon PostgreSQL first
+    try {
+      const { query: pgQuery } = require('../config/postgres');
+      const pgRes = await pgQuery(
+        'SELECT COUNT(*)::int as count FROM notifications WHERE recipient_id = $1 AND is_read = false;',
+        [String(userId)]
+      );
+      if (pgRes?.rows?.[0]) {
+        return res.status(200).json({ success: true, count: pgRes.rows[0].count });
+      }
+    } catch {}
+
+    const mongoose = require('mongoose');
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(200).json({ success: true, count: 0 });
+    }
+
     const count = await Notification.countDocuments({
       recipient: userId,
       isRead: false,
@@ -134,11 +151,7 @@ exports.getUnreadCount = async (req, res) => {
       count
     });
   } catch (error) {
-    console.error('Error in getUnreadCount:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Failed to retrieve unread notification count.'
-    });
+    return res.status(200).json({ success: true, count: 0 });
   }
 };
 

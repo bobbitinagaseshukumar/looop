@@ -7,7 +7,7 @@ const NEON_SQL_ENDPOINT = 'https://ep-small-wind-b4hjagr6.c-6.us-east-2.aws.neon
 const DEFAULT_AUTH = ['neondb_owner:', 'npg_', 'PzhnYria0G2e'].join('');
 const NEON_CONN_STRING =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_NEON_DATABASE_URL) ||
-  `postgresql://${DEFAULT_AUTH}@ep-small-wind-b4hjagr6-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require`;
+  `postgresql://${DEFAULT_AUTH}@ep-small-wind-b4hjagr6-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require`;
 
 export const neonDb = {
   /**

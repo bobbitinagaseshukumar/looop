@@ -6,7 +6,7 @@ let pool = null;
 let isConnected = false;
 let dbInfo = { host: null, database: null, version: null };
 
-const DEFAULT_NEON_URL = 'postgresql://neondb_owner:npg_PzhnYria0G2e@ep-small-wind-b4hjagr6-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require';
+const DEFAULT_NEON_URL = 'postgresql://neondb_owner:npg_PzhnYria0G2e@ep-small-wind-b4hjagr6-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
 /**
  * Build PostgreSQL Connection Pool Configuration
