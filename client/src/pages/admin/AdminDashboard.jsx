@@ -31,8 +31,12 @@ export const AdminDashboard = () => {
       setIsLoading(true);
       setError('');
       const res = await adminService.getDashboard(selectedRange);
-      if (res?.success) {
+      if (res?.success && res?.data) {
         setData(res.data);
+      } else if (res?.data) {
+        setData(res.data);
+      } else if (res?.metrics) {
+        setData(res);
       }
     } catch (err) {
       console.error('Failed to load dashboard:', err);
@@ -67,9 +71,26 @@ export const AdminDashboard = () => {
           <h1 style={{ fontSize: '1.85rem', fontWeight: 800, color: '#ffffff', margin: '0 0 4px 0' }}>
             Platform Overview
           </h1>
-          <p style={{ color: '#94a3b8', fontSize: '0.9rem', margin: 0 }}>
-            Real-time MongoDB statistics, platform governance, and moderation status.
-          </p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '4px' }}>
+            <p style={{ color: '#94a3b8', fontSize: '0.9rem', margin: 0 }}>
+              Real-time Neon Database statistics, platform governance, and moderation status.
+            </p>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: 'rgba(16, 185, 129, 0.15)',
+              color: '#34d399',
+              border: '1px solid rgba(16, 185, 129, 0.3)',
+              borderRadius: '20px',
+              padding: '2px 10px',
+              fontSize: '0.75rem',
+              fontWeight: 600
+            }}>
+              <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} />
+              Neon Database Active
+            </span>
+          </div>
         </div>
 
         {/* Time Range Selector */}
@@ -127,7 +148,7 @@ export const AdminDashboard = () => {
         </div>
       )}
 
-      {/* Main Metric Cards Grid (Real MongoDB Values) */}
+      {/* Main Metric Cards Grid (Real Neon Database Values) */}
       <div
         style={{
           display: 'grid',

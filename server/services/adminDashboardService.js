@@ -50,40 +50,21 @@ const getDashboardOverview = async (range = '30d') => {
 
   const startDate = getStartDateForRange(range);
 
-  // Execute Mongo count queries concurrently as secondary fallback
-  let [
-    totalUsers,
-    activeUsers,
-    totalItems,
-    availableItems,
-    activeWantedItems,
-    pendingRequests,
-    activeTransactions,
-    completedTransactions,
-    openReports,
-    totalReviews,
-    newUsersInPeriod,
-    newItemsInPeriod,
-    completedInPeriod
-  ] = await Promise.all([
-    User.countDocuments().catch(() => 0),
-    User.countDocuments({ accountStatus: 'active' }).catch(() => 0),
-    Item.countDocuments().catch(() => 0),
-    Item.countDocuments({ availability: 'Available', status: 'active' }).catch(() => 0),
-    WantedItem.countDocuments({ status: 'ACTIVE' }).catch(() => 0),
-    Request.countDocuments({ status: 'PENDING' }).catch(() => 0),
-    Transaction.countDocuments({
-      status: { $in: ['PENDING_HANDOVER', 'HANDOVER_SCHEDULED', 'HANDED_OVER', 'ACTIVE', 'RETURN_PENDING'] }
-    }).catch(() => 0),
-    Transaction.countDocuments({ status: 'COMPLETED' }).catch(() => 0),
-    Report.countDocuments({ status: { $in: ['PENDING', 'REVIEWED'] } }).catch(() => 0),
-    Review.countDocuments().catch(() => 0),
-    User.countDocuments({ createdAt: { $gte: startDate } }).catch(() => 0),
-    Item.countDocuments({ createdAt: { $gte: startDate } }).catch(() => 0),
-    Transaction.countDocuments({ status: 'COMPLETED', updatedAt: { $gte: startDate } }).catch(() => 0)
-  ]);
+  let totalUsers = 0;
+  let activeUsers = 0;
+  let totalItems = 0;
+  let availableItems = 0;
+  let activeWantedItems = 0;
+  let pendingRequests = 0;
+  let activeTransactions = 0;
+  let completedTransactions = 0;
+  let openReports = 0;
+  let totalReviews = 0;
+  let newUsersInPeriod = 0;
+  let newItemsInPeriod = 0;
+  let completedInPeriod = 0;
 
-  // Query Neon PostgreSQL for authoritative live platform statistics
+  // 1. Query Neon PostgreSQL as PRIMARY authoritative platform statistics
   try {
     const [
       pgUsersTotalRes,
@@ -126,7 +107,49 @@ const getDashboardOverview = async (range = '30d') => {
     if (pgReportsOpenRes?.rows?.[0]) openReports = pgReportsOpenRes.rows[0].count;
     if (pgReviewsTotalRes?.rows?.[0]) totalReviews = pgReviewsTotalRes.rows[0].count;
   } catch (pgErr) {
-    console.warn('[adminDashboardService] Neon PG stats fallback notice:', pgErr.message);
+    console.warn('[adminDashboardService] Neon PG stats error, checking Mongo fallback:', pgErr.message);
+  }
+
+  // 2. Secondary fallback to Mongo only if totalUsers is 0
+  if (totalUsers === 0) {
+    try {
+      const [
+        mUsers,
+        mActiveUsers,
+        mItems,
+        mAvailItems,
+        mWanted,
+        mRequests,
+        mTxActive,
+        mTxComp,
+        mReports,
+        mReviews
+      ] = await Promise.all([
+        User.countDocuments().catch(() => 0),
+        User.countDocuments({ accountStatus: 'active' }).catch(() => 0),
+        Item.countDocuments().catch(() => 0),
+        Item.countDocuments({ availability: 'Available', status: 'active' }).catch(() => 0),
+        WantedItem.countDocuments({ status: 'ACTIVE' }).catch(() => 0),
+        Request.countDocuments({ status: 'PENDING' }).catch(() => 0),
+        Transaction.countDocuments({
+          status: { $in: ['PENDING_HANDOVER', 'HANDOVER_SCHEDULED', 'HANDED_OVER', 'ACTIVE', 'RETURN_PENDING'] }
+        }).catch(() => 0),
+        Transaction.countDocuments({ status: 'COMPLETED' }).catch(() => 0),
+        Report.countDocuments({ status: { $in: ['PENDING', 'REVIEWED'] } }).catch(() => 0),
+        Review.countDocuments().catch(() => 0)
+      ]);
+
+      totalUsers = mUsers;
+      activeUsers = mActiveUsers;
+      totalItems = mItems;
+      availableItems = mAvailItems;
+      activeWantedItems = mWanted;
+      pendingRequests = mRequests;
+      activeTransactions = mTxActive;
+      completedTransactions = mTxComp;
+      openReports = mReports;
+      totalReviews = mReviews;
+    } catch {}
   }
 
   // Category Distribution aggregation from Neon PG
