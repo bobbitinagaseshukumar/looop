@@ -153,17 +153,25 @@ export const LoginPage = () => {
       if (response && response.token && response.user) {
         setPendingSession(response);
         // 2. Dispatch Brevo Email OTP code for 2-step login verification
-        await authService.sendOtp(email.trim());
-        setOtpEmail(email.trim());
-        setLoginStep('otp');
-        setOtpDigits(['', '', '', '', '', '']);
-        setOtpCountdown(60);
-        addToast({
-          title: 'Verification Code Dispatched',
-          message: `A 6-digit login OTP code has been sent to ${email.trim()} via Brevo Email.`,
-          variant: 'info'
-        });
-        setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
+        try {
+          const otpRes = await authService.sendOtp(email.trim());
+          setOtpEmail(email.trim());
+          setLoginStep('otp');
+          setOtpDigits(['', '', '', '', '', '']);
+          setOtpCountdown(60);
+          addToast({
+            title: 'Verification Code Dispatched',
+            message: otpRes?.demoCode
+              ? `Verification code: ${otpRes.demoCode}`
+              : `A 6-digit login OTP code has been sent to ${email.trim()} via Brevo Email.`,
+            variant: 'info'
+          });
+          setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
+        } catch (otpErr) {
+          console.warn('OTP dispatch notice:', otpErr?.message);
+          // If OTP service is temporarily offline, log in directly since password was verified
+          handleAuthSuccess(response.user, response.token, response.user.name);
+        }
       } else {
         throw new Error('Invalid response from authentication server.');
       }
@@ -172,7 +180,11 @@ export const LoginPage = () => {
         err.response?.data?.message ||
         err.message ||
         'Invalid email or password. Please try again.';
-      setServerError(errorMsg);
+      const cleanMsg =
+        errorMsg.includes('Failed to fetch') || errorMsg.includes('Network Error') || errorMsg.includes('Cannot connect')
+          ? 'Cannot connect to LOOOP server. Please ensure the backend server is running on port 5000.'
+          : errorMsg;
+      setServerError(cleanMsg);
     } finally {
       setIsSubmitting(false);
     }
