@@ -1,6 +1,12 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { MapPin, Search, Navigation, AlertCircle, ShieldCheck, CheckCircle2 } from 'lucide-react';
-import { loadGoogleMaps, approximateCoordinates } from '../../services/googleMapsLoader';
+import {
+  loadGoogleMaps,
+  approximateCoordinates,
+  subscribeGoogleMapsError,
+  getGoogleMapsError
+} from '../../services/googleMapsLoader';
+import { reverseGeocodeLocation } from '../../services/geocodingService';
 import GoogleMapsFallback from './GoogleMapsFallback';
 
 /**
@@ -23,88 +29,90 @@ export const GoogleMapPicker = ({
   const autocompleteRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(getGoogleMapsError());
   const [locality, setLocality] = useState(initialLocality);
   const [city, setCity] = useState(initialCity);
+  const [searchQuery, setSearchQuery] = useState(
+    initialLocality ? `${initialLocality}, ${initialCity}` : initialCity
+  );
   const [coordinates, setCoordinates] = useState(initialCoordinates);
   const [isLocating, setIsLocating] = useState(false);
   const [privacyMessage, setPrivacyMessage] = useState('Approximate 500m neighborhood radius recorded for privacy');
 
+  useEffect(() => {
+    if (initialLocality || initialCity) {
+      setLocality(initialLocality);
+      setCity(initialCity);
+      setSearchQuery(initialLocality ? `${initialLocality}, ${initialCity}` : initialCity);
+    }
+  }, [initialLocality, initialCity]);
+
   // Reverse Geocoding helper to extract city & locality from lat/lng
-  const reverseGeocode = useCallback((lat, lng) => {
-    if (!window.google?.maps?.Geocoder) return;
-    const geocoder = new window.google.maps.Geocoder();
-    geocoder.geocode({ location: { lat, lng } }, (results, status) => {
-      if (status === 'OK' && results && results[0]) {
-        let extractedLocality = '';
-        let extractedCity = '';
-        let extractedState = '';
+  const reverseGeocode = useCallback(
+    async (lat, lng) => {
+      const geo = await reverseGeocodeLocation(lat, lng);
+      setLocality(geo.locality);
+      setCity(geo.city);
+      setSearchQuery(geo.formattedAddress);
 
-        const components = results[0].address_components || [];
-        for (const comp of components) {
-          const types = comp.types || [];
-          if (types.includes('sublocality') || types.includes('sublocality_level_1') || types.includes('neighborhood')) {
-            extractedLocality = comp.long_name;
-          } else if (types.includes('locality')) {
-            extractedCity = comp.long_name;
-          } else if (types.includes('administrative_area_level_1')) {
-            extractedState = comp.long_name;
-          }
-        }
-
-        if (!extractedLocality && extractedCity) extractedLocality = extractedCity;
-        if (!extractedCity && extractedState) extractedCity = extractedState;
-
-        const newLocality = extractedLocality || 'Selected Zone';
-        const newCity = extractedCity || 'Bengaluru';
-
-        setLocality(newLocality);
-        setCity(newCity);
-
-        if (onChange) {
-          onChange({
-            coordinates: [lat, lng],
-            locality: newLocality,
-            city: newCity,
-            formattedAddress: results[0].formatted_address
-          });
-        }
+      if (onChange) {
+        onChange({
+          coordinates: [lat, lng],
+          locality: geo.locality,
+          city: geo.city,
+          formattedAddress: geo.formattedAddress
+        });
       }
-    });
-  }, [onChange]);
+    },
+    [onChange]
+  );
 
   // Update map marker and 500m privacy circle position
-  const updateMapPosition = useCallback((lat, lng, doReverseGeocode = true) => {
-    if (!mapInstanceRef.current || !markerRef.current) return;
-    const pos = { lat, lng };
+  const updateMapPosition = useCallback(
+    (lat, lng, doReverseGeocode = true) => {
+      if (!mapInstanceRef.current || !markerRef.current) return;
+      const pos = { lat, lng };
 
-    mapInstanceRef.current.panTo(pos);
-    markerRef.current.setPosition(pos);
+      mapInstanceRef.current.panTo(pos);
+      markerRef.current.setPosition(pos);
 
-    if (circleRef.current) {
-      circleRef.current.setCenter(pos);
-    } else if (window.google?.maps?.Circle) {
-      circleRef.current = new window.google.maps.Circle({
-        strokeColor: '#10b981',
-        strokeOpacity: 0.8,
-        strokeWeight: 2,
-        fillColor: '#10b981',
-        fillOpacity: 0.18,
-        map: mapInstanceRef.current,
-        center: pos,
-        radius: 500 // 500 meters privacy zone
-      });
-    }
+      if (circleRef.current) {
+        circleRef.current.setCenter(pos);
+      } else if (window.google?.maps?.Circle) {
+        circleRef.current = new window.google.maps.Circle({
+          strokeColor: '#10b981',
+          strokeOpacity: 0.8,
+          strokeWeight: 2,
+          fillColor: '#10b981',
+          fillOpacity: 0.18,
+          map: mapInstanceRef.current,
+          center: pos,
+          radius: 500 // 500 meters privacy zone
+        });
+      }
 
-    setCoordinates([lat, lng]);
+      setCoordinates([lat, lng]);
 
-    if (doReverseGeocode) {
-      reverseGeocode(lat, lng);
-    }
-  }, [reverseGeocode]);
+      if (doReverseGeocode) {
+        reverseGeocode(lat, lng);
+      }
+    },
+    [reverseGeocode]
+  );
+
+  // Subscribe to global Google Maps errors (e.g. auth failure)
+  useEffect(() => {
+    const unsub = subscribeGoogleMapsError((err) => {
+      setError(err || 'Google Maps failed to authenticate.');
+    });
+    return () => {
+      if (typeof unsub === 'function') unsub();
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
+    let observer = null;
 
     loadGoogleMaps()
       .then((maps) => {
@@ -205,6 +213,20 @@ export const GoogleMapPicker = ({
           });
         }
 
+        if (mapContainerRef.current) {
+          observer = new MutationObserver(() => {
+            if (
+              mapContainerRef.current?.querySelector?.('.gm-err-container') ||
+              mapContainerRef.current?.querySelector?.('[class*="gm-err"]')
+            ) {
+              if (mounted) {
+                setError('Google Maps authentication failed.');
+              }
+            }
+          });
+          observer.observe(mapContainerRef.current, { childList: true, subtree: true });
+        }
+
         setLoading(false);
       })
       .catch((err) => {
@@ -215,6 +237,9 @@ export const GoogleMapPicker = ({
 
     return () => {
       mounted = false;
+      if (observer) {
+        observer.disconnect();
+      }
       if (circleRef.current) {
         circleRef.current.setMap(null);
       }
@@ -282,7 +307,8 @@ export const GoogleMapPicker = ({
             ref={searchInputRef}
             type="text"
             placeholder="Search area, locality, or landmark (e.g. Indiranagar, HSR Layout)..."
-            defaultValue={locality ? `${locality}, ${city}` : city}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
             style={{
               width: '100%',
               padding: '0.65rem 0.75rem 0.65rem 2.4rem',

@@ -3,6 +3,7 @@ import { MapPin, Navigation, Search, ShieldCheck } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { MapContainer, TileLayer, Marker, Circle, useMapEvents, Popup } from 'react-leaflet';
+import { reverseGeocodeLocation } from '../../services/geocodingService';
 
 // Fix Leaflet marker icons safely in Vite bundlers
 try {
@@ -58,19 +59,37 @@ export const GoogleMapsFallback = ({
   };
 
   const [position, setPosition] = useState(parsePos(coordinates));
+  const [currentLocality, setCurrentLocality] = useState(locality);
+  const [currentCity, setCurrentCity] = useState(city);
+  const [searchQuery, setSearchQuery] = useState(locality ? `${locality}, ${city}` : city);
+  const [isLocating, setIsLocating] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
 
   useEffect(() => {
     setPosition(parsePos(coordinates));
   }, [coordinates]);
 
-  const handleMapClick = (lat, lng) => {
+  useEffect(() => {
+    if (locality || city) {
+      setCurrentLocality(locality);
+      setCurrentCity(city);
+      setSearchQuery(locality ? `${locality}, ${city}` : city);
+    }
+  }, [locality, city]);
+
+  const handleMapClick = async (lat, lng) => {
     if (!interactive) return;
     setPosition([lat, lng]);
+    const geo = await reverseGeocodeLocation(lat, lng);
+    setCurrentLocality(geo.locality);
+    setCurrentCity(geo.city);
+    setSearchQuery(geo.formattedAddress);
     if (onChange) {
       onChange({
         coordinates: [lat, lng],
-        locality: locality || 'Selected Area',
-        city: city || 'Bengaluru'
+        locality: geo.locality,
+        city: geo.city,
+        formattedAddress: geo.formattedAddress
       });
     }
   };
@@ -82,7 +101,7 @@ export const GoogleMapsFallback = ({
     setIsSearching(true);
     try {
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}`
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&addressdetails=1`
       );
       const data = await res.json();
       if (data && data.length > 0) {
@@ -90,16 +109,17 @@ export const GoogleMapsFallback = ({
         const lat = parseFloat(first.lat);
         const lng = parseFloat(first.lon);
         setPosition([lat, lng]);
-        const parts = first.display_name.split(',');
-        const newLoc = parts[0]?.trim() || locality;
-        const newCity = parts[1]?.trim() || city;
+        const geo = await reverseGeocodeLocation(lat, lng);
+        setCurrentLocality(geo.locality);
+        setCurrentCity(geo.city);
+        setSearchQuery(geo.formattedAddress);
 
         if (onChange) {
           onChange({
             coordinates: [lat, lng],
-            locality: newLoc,
-            city: newCity,
-            formattedAddress: first.display_name
+            locality: geo.locality,
+            city: geo.city,
+            formattedAddress: geo.formattedAddress
           });
         }
       }
@@ -111,21 +131,37 @@ export const GoogleMapsFallback = ({
   };
 
   const handleCurrentLocation = () => {
-    if (!navigator.geolocation) return;
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      return;
+    }
+    setIsLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
+      async (pos) => {
+        setIsLocating(false);
         const lat = pos.coords.latitude;
         const lng = pos.coords.longitude;
         setPosition([lat, lng]);
+        const geo = await reverseGeocodeLocation(lat, lng);
+        setCurrentLocality(geo.locality);
+        setCurrentCity(geo.city);
+        setSearchQuery(geo.formattedAddress);
+
         if (onChange) {
           onChange({
             coordinates: [lat, lng],
-            locality: locality || 'Current Location',
-            city: city || 'Bengaluru'
+            locality: geo.locality,
+            city: geo.city,
+            formattedAddress: geo.formattedAddress
           });
         }
       },
-      (err) => console.warn('Geolocation failed:', err)
+      (err) => {
+        setIsLocating(false);
+        console.warn('Geolocation failed:', err);
+        alert('Could not retrieve current location. Please search manually using the search bar.');
+      },
+      { timeout: 10000, maximumAge: 60000 }
     );
   };
 

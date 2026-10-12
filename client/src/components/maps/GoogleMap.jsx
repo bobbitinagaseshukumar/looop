@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
-import { loadGoogleMaps } from '../../services/googleMapsLoader';
+import { loadGoogleMaps, getGoogleMapsError, subscribeGoogleMapsError } from '../../services/googleMapsLoader';
 import GoogleMapsFallback from './GoogleMapsFallback';
 
 /**
@@ -25,7 +25,11 @@ export const GoogleMap = ({
   const polylineRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(getGoogleMapsError());
+
+  useEffect(() => {
+    return subscribeGoogleMapsError((err) => setError(err));
+  }, []);
 
   const renderMarkers = useCallback((maps, map) => {
     // Clear old markers

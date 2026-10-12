@@ -31,6 +31,7 @@ import { useToast } from '../../hooks/useToast';
 import { wantedService } from '../../services/wantedService';
 import { itemService } from '../../services/itemService';
 import { GoogleMapPicker } from '../../components/maps/GoogleMapPicker';
+import { reverseGeocodeLocation } from '../../services/geocodingService';
 import { mockCategories } from '../../data/mockData';
 
 export const CreateWantedItemPage = () => {
@@ -153,16 +154,25 @@ export const CreateWantedItemPage = () => {
 
     setGettingLocation(true);
     navigator.geolocation.getCurrentPosition(
-      () => {
-        setCity('Bengaluru');
-        setLocality('Indiranagar');
-        setState('Karnataka');
-        setGettingLocation(false);
-        addToast({
-          title: 'Location Updated',
-          message: 'Approximate neighborhood set to Indiranagar, Bengaluru.',
-          variant: 'success'
-        });
+      async (pos) => {
+        try {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          const geo = await reverseGeocodeLocation(lat, lng);
+          if (geo.city) setCity(geo.city);
+          if (geo.locality) setLocality(geo.locality);
+          if (geo.state) setState(geo.state);
+          setGettingLocation(false);
+          addToast({
+            title: 'Location Updated',
+            message: `Approximate neighborhood set to ${[geo.locality, geo.city].filter(Boolean).join(', ')}.`,
+            variant: 'success'
+          });
+        } catch {
+          setCity('Bengaluru');
+          setLocality('Indiranagar');
+          setGettingLocation(false);
+        }
       },
       () => {
         setGettingLocation(false);

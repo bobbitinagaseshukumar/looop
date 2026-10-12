@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, Search, Navigation, ExternalLink, Tag, RefreshCw } from 'lucide-react';
-import { loadGoogleMaps, calculateDistanceKm } from '../../services/googleMapsLoader';
+import { loadGoogleMaps, calculateDistanceKm, getGoogleMapsError, subscribeGoogleMapsError } from '../../services/googleMapsLoader';
 import GoogleMapsFallback from './GoogleMapsFallback';
 
 /**
@@ -24,8 +24,12 @@ export const GoogleBrowseMap = ({
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(getGoogleMapsError());
   const [activePreviewItem, setActivePreviewItem] = useState(selectedItem);
+
+  useEffect(() => {
+    return subscribeGoogleMapsError((err) => setError(err));
+  }, []);
 
   // Helper to extract [lat, lng] from item safely
   const getItemCoords = (item) => {

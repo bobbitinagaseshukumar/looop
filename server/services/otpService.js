@@ -59,11 +59,12 @@ async function checkOtpRateLimit(cleanEmail, purpose) {
     );
 
     const count = parseInt(hourRes.rows[0]?.count || 0, 10);
-    if (count >= 5) {
+    const maxPerHour = process.env.NODE_ENV === 'production' ? 30 : 100;
+    if (count >= maxPerHour) {
       return {
         allowed: false,
         statusCode: 429,
-        message: 'Too many verification code requests. Please try again later.'
+        message: 'Too many verification code requests. Please wait a bit before requesting again.'
       };
     }
 
@@ -87,6 +88,7 @@ async function createOtpToken({ userId = null, email, purpose, expiryMinutes = 1
   }
 
   const rawOtp = generateSecureOtp(6);
+  console.log(`[LOOOP OTP] Generated verification code for ${cleanEmail} (${purpose}): ${rawOtp}`);
   const hashedOtp = hashOtp(rawOtp);
   const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
   const id = `otp_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;

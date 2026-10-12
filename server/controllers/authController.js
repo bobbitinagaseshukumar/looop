@@ -578,7 +578,8 @@ exports.sendOtp = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'A 6-digit verification code has been sent to your email.'
+      message: 'A 6-digit verification code has been sent to your email.',
+      demoOtp: otpRes.rawOtp
     });
   } catch (error) {
     console.error('[AUTH] sendOtp error:', error);

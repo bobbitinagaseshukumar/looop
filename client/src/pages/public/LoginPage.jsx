@@ -278,13 +278,15 @@ export const LoginPage = () => {
 
     setIsSendingOtp(true);
     try {
-      await authService.sendOtp(targetEmail);
+      const otpRes = await authService.sendOtp(targetEmail);
       setOtpSent(true);
       setOtpDigits(['', '', '', '', '', '']);
       setOtpCountdown(60);
       addToast({
         title: 'Verification Code Dispatched',
-        message: `A 6-digit OTP code has been sent to ${targetEmail} via Brevo Email.`,
+        message: otpRes?.demoCode
+          ? `Verification code: ${otpRes.demoCode}`
+          : `A 6-digit OTP code has been sent to ${targetEmail} via Brevo Email.`,
         variant: 'info'
       });
       setTimeout(() => otpInputRefs.current[0]?.focus(), 150);

@@ -28,6 +28,7 @@ import Button from '../../components/common/Button';
 import Badge from '../../components/common/Badge';
 import ProductMediaUploader from '../../components/upload/ProductMediaUploader';
 import { GoogleMapPicker } from '../../components/maps/GoogleMapPicker';
+import { reverseGeocodeLocation } from '../../services/geocodingService';
 import { LiveListingPreview } from '../../components/share/LiveListingPreview';
 import { PublishSuccessState } from '../../components/share/PublishSuccessState';
 import { useAuth } from '../../context/AuthContext';
@@ -43,7 +44,8 @@ const STEPS = [
   { id: 3, title: 'Sharing Type', desc: 'Free, Borrow, etc.' },
   { id: 4, title: 'Item Details', desc: 'Condition & Description' },
   { id: 5, title: 'Location', desc: 'City & Map' },
-  { id: 6, title: 'Review & Publish', desc: 'Summary & Publish' }
+  { id: 6, title: 'Availability', desc: 'Rules & Status' },
+  { id: 7, title: 'Review & Publish', desc: 'Summary & Publish' }
 ];
 
 export const ShareItemPage = () => {
@@ -366,16 +368,36 @@ export const ShareItemPage = () => {
 
     setDetectingLocation(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setDetectingLocation(false);
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setCoordinates([lat, lng]);
-        addToast({
-          title: 'Location Detected',
-          message: 'Approximate discovery coordinates updated securely.',
-          variant: 'success'
-        });
+      async (pos) => {
+        try {
+          const lat = pos.coords.latitude;
+          const lng = pos.coords.longitude;
+          setCoordinates([lat, lng]);
+
+          // Reverse geocode to auto-update city and locality in text areas
+          const geo = await reverseGeocodeLocation(lat, lng);
+          if (geo.city) {
+            setCity(geo.city);
+            if (touched.city) validateField('city', geo.city);
+          }
+          if (geo.locality) {
+            setLocality(geo.locality);
+          }
+
+          setDetectingLocation(false);
+          addToast({
+            title: 'Location Detected',
+            message: `Approximate neighborhood set to ${[geo.locality, geo.city].filter(Boolean).join(', ')}.`,
+            variant: 'success'
+          });
+        } catch {
+          setDetectingLocation(false);
+          addToast({
+            title: 'Location Detected',
+            message: 'Approximate coordinates updated securely.',
+            variant: 'success'
+          });
+        }
       },
       (err) => {
         setDetectingLocation(false);
@@ -413,6 +435,10 @@ export const ShareItemPage = () => {
         message: 'Fill in the required fields marked with friendly warnings.',
         variant: 'danger'
       });
+      if (!isTitleValid) setCurrentStep(1);
+      else if (!isImagesValid) setCurrentStep(2);
+      else if (!isDescValid) setCurrentStep(4);
+      else if (!isCityValid) setCurrentStep(5);
       formTopRef.current?.scrollIntoView({ behavior: 'smooth' });
       return;
     }
@@ -511,7 +537,16 @@ export const ShareItemPage = () => {
   const subcategoryList = SUBCATEGORIES_MAP[category] || ['General', 'Other'];
 
   return (
-    <div ref={formTopRef} style={{ maxWidth: '1240px', margin: '0 auto' }}>
+    <div
+      ref={formTopRef}
+      style={{
+        maxWidth: '1240px',
+        margin: '0 auto',
+        width: '100%',
+        boxSizing: 'border-box',
+        padding: '0 clamp(0.75rem, 2.5vw, 1.25rem)'
+      }}
+    >
       {/* 1. COMPACT PAGE HEADER */}
       <div style={{ marginBottom: '1.25rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '0.35rem' }}>
@@ -738,7 +773,7 @@ export const ShareItemPage = () => {
               ==================================================== */}
           {currentStep === 1 && (
             <div className="step-slide-container">
-              <Card style={{ padding: '1.75rem' }}>
+              <Card className="share-item-card" style={{ padding: 'clamp(1.15rem, 3vw, 1.75rem)' }}>
                 <div style={{ borderBottom: '1px solid var(--color-slate-100)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -770,7 +805,7 @@ export const ShareItemPage = () => {
                   />
 
                   {/* Category & Subcategory */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '1rem' }}>
                     <Select
                       label="Category"
                       value={category}
@@ -789,7 +824,7 @@ export const ShareItemPage = () => {
                   </div>
 
                   {/* Optional Brand & Model */}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '1rem' }}>
                     <Input
                       label="Brand (Optional)"
                       placeholder="e.g. Casio, IKEA, Sony, Nike"
@@ -808,7 +843,7 @@ export const ShareItemPage = () => {
                 </div>
 
                 {/* Step 1 Control Buttons */}
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)', flexWrap: 'wrap', gap: '10px' }}>
                   <Button
                     type="button"
                     variant="primary"
@@ -829,7 +864,7 @@ export const ShareItemPage = () => {
               ==================================================== */}
           {currentStep === 2 && (
             <div className="step-slide-container">
-              <Card style={{ padding: '1.75rem' }}>
+              <Card className="share-item-card" style={{ padding: 'clamp(1.15rem, 3vw, 1.75rem)' }}>
                 <div style={{ borderBottom: '1px solid var(--color-slate-100)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -854,7 +889,7 @@ export const ShareItemPage = () => {
                 />
 
                 {/* Step 2 Control Buttons */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)', flexWrap: 'wrap', gap: '10px' }}>
                   <Button type="button" variant="outline" onClick={handlePrevStep} iconLeft={ArrowLeft}>
                     Previous: Item Basics
                   </Button>
@@ -878,7 +913,7 @@ export const ShareItemPage = () => {
               ==================================================== */}
           {currentStep === 3 && (
             <div className="step-slide-container">
-              <Card style={{ padding: '1.75rem' }}>
+              <Card className="share-item-card" style={{ padding: 'clamp(1.15rem, 3vw, 1.75rem)' }}>
                 <div style={{ borderBottom: '1px solid var(--color-slate-100)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -897,7 +932,7 @@ export const ShareItemPage = () => {
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
                     gap: '12px',
                     marginBottom: '1.25rem'
                   }}
@@ -1100,110 +1135,103 @@ export const ShareItemPage = () => {
           )}
 
           {/* ====================================================
-              STEP 4 SLIDE — CONDITION & DESCRIPTION
+              STEP 4 SLIDE — CONDITION & DESCRIPTION (ONE CARD)
               ==================================================== */}
           {currentStep === 4 && (
-            <div className="step-slide-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
-              {/* Item Condition */}
-              <Card style={{ padding: '1.75rem' }}>
+            <div className="step-slide-container">
+              <Card className="share-item-card" style={{ padding: 'clamp(1.15rem, 3vw, 1.75rem)' }}>
                 <div style={{ borderBottom: '1px solid var(--color-slate-100)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       4
                     </span>
                     <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                      Item Condition
+                      Item Details
                     </h2>
                   </div>
                   <p style={{ fontSize: '0.8rem', color: 'var(--color-slate-500)', marginTop: '2px', marginLeft: '32px' }}>
-                    Accurate condition ratings ensure high trust and seamless handovers.
+                    Select the item condition rating and provide a helpful description for neighbors.
                   </p>
                 </div>
 
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                    gap: '10px',
-                    marginBottom: '1rem'
-                  }}
-                  role="radiogroup"
-                  aria-label="Item Condition"
-                >
-                  {[
-                    { id: 'new', label: 'New', desc: 'Brand new, never opened or used' },
-                    { id: 'like_new', label: 'Like New', desc: 'Tested, zero flaws or signs of wear' },
-                    { id: 'good', label: 'Good', desc: 'Used but fully functional with normal signs of use' },
-                    { id: 'fair', label: 'Fair', desc: 'Functional with visible cosmetic wear' },
-                    { id: 'needs_repair', label: 'Needs Repair', desc: 'Fixer-upper or useful for spare parts' }
-                  ].map((c) => {
-                    const isSelected = condition === c.id;
-                    return (
-                      <div
-                        key={c.id}
-                        onClick={() => setCondition(c.id)}
-                        style={{
-                          padding: '12px',
-                          borderRadius: 'var(--radius-md)',
-                          border: isSelected ? '2px solid #059669' : '1px solid var(--color-slate-200)',
-                          backgroundColor: isSelected ? '#ecfdf5' : '#ffffff',
-                          cursor: 'pointer',
-                          transition: 'all var(--transition-fast)'
-                        }}
-                        role="radio"
-                        aria-checked={isSelected}
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === ' ' || e.key === 'Enter') setCondition(c.id);
-                        }}
-                        className="condition-card"
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                          <strong style={{ fontSize: '0.9rem', color: 'var(--color-slate-900)' }}>{c.label}</strong>
-                          {isSelected && <Check size={14} color="#059669" />}
-                        </div>
-                        <p style={{ fontSize: '0.72rem', color: 'var(--color-slate-500)', margin: 0, lineHeight: 1.3 }}>
-                          {c.desc}
-                        </p>
-                      </div>
-                    );
-                  })}
-                </div>
-              </Card>
-
-              {/* Item Description */}
-              <Card style={{ padding: '1.75rem' }}>
-                <div style={{ borderBottom: '1px solid var(--color-slate-100)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      5
-                    </span>
-                    <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
-                      Item Description
-                    </h2>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                  {/* Item Condition */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.875rem', fontWeight: 700, color: 'var(--color-slate-800)', marginBottom: '0.5rem' }}>
+                      Item Condition Rating <span style={{ color: '#ef4444' }}>*</span>
+                    </label>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 150px), 1fr))',
+                        gap: '10px'
+                      }}
+                      role="radiogroup"
+                      aria-label="Item Condition"
+                    >
+                      {[
+                        { id: 'new', label: 'New', desc: 'Brand new, never opened or used' },
+                        { id: 'like_new', label: 'Like New', desc: 'Tested, zero flaws or signs of wear' },
+                        { id: 'good', label: 'Good', desc: 'Used but fully functional with normal wear' },
+                        { id: 'fair', label: 'Fair', desc: 'Functional with visible cosmetic wear' },
+                        { id: 'needs_repair', label: 'Needs Repair', desc: 'Fixer-upper or for spare parts' }
+                      ].map((c) => {
+                        const isSelected = condition === c.id;
+                        return (
+                          <div
+                            key={c.id}
+                            onClick={() => setCondition(c.id)}
+                            style={{
+                              padding: '12px',
+                              borderRadius: 'var(--radius-md)',
+                              border: isSelected ? '2px solid #059669' : '1px solid var(--color-slate-200)',
+                              backgroundColor: isSelected ? '#ecfdf5' : '#ffffff',
+                              cursor: 'pointer',
+                              transition: 'all var(--transition-fast)'
+                            }}
+                            role="radio"
+                            aria-checked={isSelected}
+                            tabIndex={0}
+                            onKeyDown={(e) => {
+                              if (e.key === ' ' || e.key === 'Enter') setCondition(c.id);
+                            }}
+                            className="condition-card"
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <strong style={{ fontSize: '0.9rem', color: 'var(--color-slate-900)' }}>{c.label}</strong>
+                              {isSelected && <Check size={14} color="#059669" />}
+                            </div>
+                            <p style={{ fontSize: '0.72rem', color: 'var(--color-slate-500)', margin: 0, lineHeight: 1.3 }}>
+                              {c.desc}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--color-slate-500)', marginTop: '2px', marginLeft: '32px' }}>
-                    Include what it is, how it was used, included accessories, and reason for sharing.
-                  </p>
-                </div>
 
-                <Textarea
-                  label="Describe your item"
-                  placeholder="e.g. Bought for semester exams last year. Works perfectly with solar backing. Comes with protective slide-on hard case. No longer needed after graduation. Happy to pass it on!"
-                  value={description}
-                  onChange={(e) => {
-                    setDescription(e.target.value);
-                    if (touched.description) validateField('description', e.target.value);
-                  }}
-                  onBlur={() => handleBlur('description', description)}
-                  error={touched.description ? errors.description : ''}
-                  rows={4}
-                  maxLength={1000}
-                  required
-                />
+                  {/* Item Description */}
+                  <div>
+                    <Textarea
+                      label="Item Description"
+                      placeholder="e.g. Bought for semester exams last year. Works perfectly with solar backing. Comes with protective slide-on hard case. Happy to pass it on!"
+                      value={description}
+                      onChange={(e) => {
+                        setDescription(e.target.value);
+                        if (touched.description) validateField('description', e.target.value);
+                      }}
+                      onBlur={() => handleBlur('description', description)}
+                      error={touched.description ? errors.description : ''}
+                      rows={4}
+                      maxLength={1000}
+                      helperText="Min 10 characters. Include usage history and included accessories."
+                      required
+                    />
+                  </div>
+                </div>
 
                 {/* Step 4 Control Buttons */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)', flexWrap: 'wrap', gap: '10px' }}>
                   <Button type="button" variant="outline" onClick={handlePrevStep} iconLeft={ArrowLeft}>
                     Previous: Sharing Type
                   </Button>
@@ -1223,16 +1251,15 @@ export const ShareItemPage = () => {
           )}
 
           {/* ====================================================
-              STEP 5 SLIDE — LOCATION & AVAILABILITY
+              STEP 5 SLIDE — LOCATION (ONLY LOCATION!)
               ==================================================== */}
           {currentStep === 5 && (
-            <div className="step-slide-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
-              {/* Location Card */}
-              <Card style={{ padding: '1.75rem' }}>
+            <div className="step-slide-container">
+              <Card className="share-item-card" style={{ padding: 'clamp(1.15rem, 3vw, 1.75rem)' }}>
                 <div style={{ borderBottom: '1px solid var(--color-slate-100)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      6
+                      5
                     </span>
                     <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
                       Approximate Location
@@ -1244,7 +1271,7 @@ export const ShareItemPage = () => {
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '1rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: '1rem' }}>
                     <Input
                       label="City / Metro Region"
                       placeholder="e.g. Bengaluru, Mumbai, Delhi, Pune"
@@ -1298,26 +1325,52 @@ export const ShareItemPage = () => {
                     </span>
                   </div>
 
-                  {/* Google Maps Location Selector */}
+                  {/* Interactive Map Location Selector */}
                   <GoogleMapPicker
                     initialCoordinates={coordinates}
                     initialLocality={locality}
                     initialCity={city}
                     onChange={({ coordinates: newCoords, locality: newLoc, city: newCity }) => {
-                      setCoordinates(newCoords);
+                      if (newCoords) setCoordinates(newCoords);
                       if (newLoc) setLocality(newLoc);
-                      if (newCity) setCity(newCity);
+                      if (newCity) {
+                        setCity(newCity);
+                        if (touched.city) validateField('city', newCity);
+                      }
                     }}
                   />
                 </div>
-              </Card>
 
-              {/* Availability & Rules */}
-              <Card style={{ padding: '1.75rem' }}>
+                {/* Step 5 Control Buttons */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)', flexWrap: 'wrap', gap: '10px' }}>
+                  <Button type="button" variant="outline" onClick={handlePrevStep} iconLeft={ArrowLeft}>
+                    Previous: Item Details
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="lg"
+                    onClick={handleNextStep}
+                    iconRight={ArrowRight}
+                    style={{ minWidth: '180px', justifyContent: 'center' }}
+                  >
+                    Next: Availability &amp; Rules
+                  </Button>
+                </div>
+              </Card>
+            </div>
+          )}
+
+          {/* ====================================================
+              STEP 6 SLIDE — AVAILABILITY & COMMUNITY RULES
+              ==================================================== */}
+          {currentStep === 6 && (
+            <div className="step-slide-container">
+              <Card className="share-item-card" style={{ padding: 'clamp(1.15rem, 3vw, 1.75rem)' }}>
                 <div style={{ borderBottom: '1px solid var(--color-slate-100)', paddingBottom: '0.85rem', marginBottom: '1.25rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                     <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      7
+                      6
                     </span>
                     <h2 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-slate-900)' }}>
                       Availability &amp; Community Rules
@@ -1328,8 +1381,8 @@ export const ShareItemPage = () => {
                   </p>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))', gap: '1rem' }}>
                     <Select
                       label="Listing Availability"
                       value={availability}
@@ -1367,10 +1420,10 @@ export const ShareItemPage = () => {
                   </div>
                 </div>
 
-                {/* Step 5 Control Buttons */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)' }}>
+                {/* Step 6 Control Buttons */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.75rem', paddingTop: '1rem', borderTop: '1px solid var(--color-slate-100)', flexWrap: 'wrap', gap: '10px' }}>
                   <Button type="button" variant="outline" onClick={handlePrevStep} iconLeft={ArrowLeft}>
-                    Previous: Item Details
+                    Previous: Location
                   </Button>
                   <Button
                     type="button"
@@ -1388,21 +1441,26 @@ export const ShareItemPage = () => {
           )}
 
           {/* ====================================================
-              STEP 6 SLIDE — REVIEW & PUBLISH ACTIONS
+              STEP 7 SLIDE — REVIEW & PUBLISH ACTIONS
               ==================================================== */}
-          {currentStep === 6 && (
+          {currentStep === 7 && (
             <div className="step-slide-container">
-              <Card style={{ padding: '1.75rem' }}>
+              <Card className="share-item-card" style={{ padding: 'clamp(1.15rem, 3vw, 1.75rem)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem', flexWrap: 'wrap', gap: '8px' }}>
-                  <div>
-                    <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-slate-900)', margin: 0 }}>
-                      Review &amp; Final Publish
-                    </h3>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-500)' }}>
-                      Check your item details before sharing with the LOOOP community.
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ width: '24px', height: '24px', borderRadius: '50%', backgroundColor: '#059669', color: '#fff', fontSize: '0.75rem', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      7
                     </span>
+                    <div>
+                      <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--color-slate-900)', margin: 0 }}>
+                        Review &amp; Final Publish
+                      </h3>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--color-slate-500)' }}>
+                        Check your item details before sharing with the LOOOP community.
+                      </span>
+                    </div>
                   </div>
-                  <Badge variant="success">Step 6 of 6</Badge>
+                  <Badge variant="success">Step 7 of 7</Badge>
                 </div>
 
                 {/* Formatted Summary Review Table */}
@@ -1415,7 +1473,7 @@ export const ShareItemPage = () => {
                     marginBottom: '1.5rem',
                     fontSize: '0.85rem',
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))',
                     gap: '14px'
                   }}
                 >
@@ -1440,8 +1498,12 @@ export const ShareItemPage = () => {
                     <strong style={{ color: 'var(--color-slate-800)' }}>{images.length} attached</strong>
                   </div>
                   <div>
-                    <span style={{ color: 'var(--color-slate-400)', display: 'block', fontSize: '0.7rem', fontWeight: 700 }}>LOCATION</span>
+                    <span style={{ color: 'var(--color-slate-400)', display: 'block', fontSize: '0.7rem', fontWeight: 700 }}>APPROXIMATE LOCATION</span>
                     <strong style={{ color: 'var(--color-slate-800)' }}>{locality ? `${locality}, ${city}` : city}</strong>
+                  </div>
+                  <div>
+                    <span style={{ color: 'var(--color-slate-400)', display: 'block', fontSize: '0.7rem', fontWeight: 700 }}>AVAILABILITY</span>
+                    <strong style={{ color: 'var(--color-slate-800)' }}>{availability}</strong>
                   </div>
                 </div>
 
@@ -1534,19 +1596,43 @@ export const ShareItemPage = () => {
       {/* Embedded CSS for slide transitions & responsive layout */}
       <style>{`
         .share-page-grid {
-          grid-template-columns: 1fr 380px !important;
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 360px !important;
+          gap: 1.75rem;
+          align-items: start;
+          width: 100%;
         }
-        @media (max-width: 1080px) {
+        @media (max-width: 1024px) {
           .share-page-grid {
-            grid-template-columns: 1fr !important;
+            grid-template-columns: minmax(0, 1fr) !important;
+            gap: 1.5rem;
           }
           .share-preview-column {
             order: 2;
-            margin-top: 2rem;
+            margin-top: 1.5rem;
+            position: static !important;
+            width: 100% !important;
+          }
+          .share-preview-column > div {
+            position: static !important;
+            top: auto !important;
+          }
+        }
+        @media (max-width: 640px) {
+          .share-page-grid {
+            gap: 1rem;
+          }
+          .share-item-card {
+            padding: 1.1rem 0.85rem !important;
+          }
+          .use-location-btn {
+            width: 100% !important;
+            justify-content: center !important;
           }
         }
         .step-slide-container {
           animation: slideInStep 0.25s ease-out forwards;
+          width: 100%;
         }
         @keyframes slideInStep {
           from {

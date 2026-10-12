@@ -215,13 +215,15 @@ export const RegisterPage = () => {
       }
 
       // 2. Email is new! Dispatch 6-digit Brevo OTP code
-      await authService.sendOtp(cleanEmail);
+      const otpRes = await authService.sendOtp(cleanEmail);
       setInlineOtpSent(true);
       setInlineOtpDigits(['', '', '', '', '', '']);
       setInlineOtpCountdown(60);
       addToast({
         title: 'Verification Code Sent',
-        message: `A 6-digit OTP code has been dispatched to ${cleanEmail} via Brevo Email.`,
+        message: otpRes?.demoCode
+          ? `Verification code: ${otpRes.demoCode}`
+          : `A 6-digit OTP code has been dispatched to ${cleanEmail} via Brevo Email.`,
         variant: 'info'
       });
       setTimeout(() => inlineOtpRefs.current[0]?.focus(), 150);
@@ -313,11 +315,13 @@ export const RegisterPage = () => {
     setServerError('');
     setIsSendingOtp(true);
     try {
-      await authService.sendOtp(email.trim());
+      const otpRes = await authService.sendOtp(email.trim());
       setOtpCountdown(60);
       addToast({
         title: 'Code Resent via Brevo',
-        message: 'A new 6-digit verification code has been dispatched to your email.',
+        message: otpRes?.demoCode
+          ? `Verification code: ${otpRes.demoCode}`
+          : 'A new 6-digit verification code has been dispatched to your email.',
         variant: 'info'
       });
     } catch (err) {

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { MapPin, ShieldCheck, Navigation } from 'lucide-react';
-import { loadGoogleMaps } from '../../services/googleMapsLoader';
+import { loadGoogleMaps, getGoogleMapsError, subscribeGoogleMapsError } from '../../services/googleMapsLoader';
 import GoogleMapsFallback from './GoogleMapsFallback';
 
 /**
@@ -20,7 +20,11 @@ export const GoogleItemLocationView = ({
   const markerRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [error, setError] = useState(getGoogleMapsError());
+
+  useEffect(() => {
+    return subscribeGoogleMapsError((err) => setError(err));
+  }, []);
 
   useEffect(() => {
     let mounted = true;

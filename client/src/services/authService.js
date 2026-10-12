@@ -254,8 +254,19 @@ export const authService = {
     // 1. Try standard API client
     try {
       const response = await api.post('/auth/otp/send', { email: cleanEmail, purpose });
-      if (response && response.data) return response.data;
-      if (response && response.success) return response;
+      const data = response?.data || response;
+      if (data && (data.success || response?.status === 200)) {
+        if (data.demoOtp) {
+          try {
+            sessionStorage.setItem(`looop_otp_${cleanEmail}`, JSON.stringify({
+              code: String(data.demoOtp),
+              timestamp: Date.now()
+            }));
+          } catch {}
+          data.demoCode = String(data.demoOtp);
+        }
+        return data;
+      }
     } catch (err) {
       console.warn('[authService.sendOtp] Primary API attempt failed:', err.message);
     }
@@ -270,6 +281,15 @@ export const authService = {
 
       const data = await directRes.json().catch(() => ({}));
       if (directRes.ok && data.success) {
+        if (data.demoOtp) {
+          try {
+            sessionStorage.setItem(`looop_otp_${cleanEmail}`, JSON.stringify({
+              code: String(data.demoOtp),
+              timestamp: Date.now()
+            }));
+          } catch {}
+          data.demoCode = String(data.demoOtp);
+        }
         return data;
       }
     } catch (directErr) {
