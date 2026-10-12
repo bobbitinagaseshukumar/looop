@@ -67,15 +67,13 @@ export const ForgotPasswordPage = () => {
 
     setIsSendingOtp(true);
     try {
-      const otpRes = await authService.sendOtp(cleanEmail, 'PASSWORD_RESET');
+      await authService.sendOtp(cleanEmail, 'PASSWORD_RESET');
       setStep('otp');
       setOtpDigits(['', '', '', '', '', '']);
       setOtpCountdown(60);
       addToast({
         title: 'Reset Code Dispatched',
-        message: otpRes?.demoCode
-          ? `Password recovery code: ${otpRes.demoCode}`
-          : `A 6-digit password recovery code has been sent to ${cleanEmail} via Brevo Email.`,
+        message: `A 6-digit password recovery code has been sent to ${cleanEmail} via Brevo Email. Please check your inbox or spam folder.`,
         variant: 'info'
       });
       setTimeout(() => otpInputRefs.current[0]?.focus(), 150);

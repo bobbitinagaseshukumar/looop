@@ -166,23 +166,51 @@ exports.createItem = async (req, res) => {
 
     // 5. Derive authenticated user ID
     const userId = req.user?.id || req.user?._id || `usr-${Date.now()}`;
+    const userEmail = (req.user?.email || '').toLowerCase().trim();
+    const userName = req.user?.name || (userEmail ? userEmail.split('@')[0] : 'LOOOP Member');
+    const effectiveRole = req.user?.role || userRole || 'customer';
     const ownerIdStr = String(userId);
-    const ownerIdMongo = mongoose.Types.ObjectId.isValid(userId)
-      ? new mongoose.Types.ObjectId(userId)
-      : new mongoose.Types.ObjectId();
+
+    let ownerIdMongo = null;
+    if (mongoose.connection && mongoose.connection.readyState === 1) {
+      try {
+        if (mongoose.Types.ObjectId.isValid(userId)) {
+          ownerIdMongo = new mongoose.Types.ObjectId(userId);
+        } else if (userEmail) {
+          let mUser = await User.findOne({ email: userEmail });
+          if (!mUser) {
+            mUser = await User.create({
+              name: userName,
+              email: userEmail,
+              password: '$2a$10$abcdefghijklmnopqrstuv',
+              role: effectiveRole,
+              trustScore: 100
+            });
+          }
+          ownerIdMongo = mUser._id;
+        }
+      } catch (mErr) {
+        console.warn('[itemController] Mongo user lookup notice:', mErr.message);
+      }
+    }
+    if (!ownerIdMongo) {
+      ownerIdMongo = mongoose.Types.ObjectId.isValid(userId)
+        ? new mongoose.Types.ObjectId(userId)
+        : new mongoose.Types.ObjectId();
+    }
 
     // 6. Ensure user exists in Neon PostgreSQL to satisfy foreign keys
     try {
       await pgQuery(
         `INSERT INTO users (id, name, email, password, role, avatar, city, state, locality, account_status, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', NOW(), NOW())
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;`,
+         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;`,
         [
           ownerIdStr,
-          req.user?.name || 'LOOOP Member',
-          req.user?.email || `${ownerIdStr}@looop.community`,
+          userName,
+          userEmail || `${ownerIdStr}@looop.community`,
           '$2a$10$abcdefghijklmnopqrstuv',
-          req.user?.role || 'customer',
+          effectiveRole,
           req.user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
           locationObj.city || '',
           locationObj.state || '',
@@ -498,11 +526,13 @@ exports.getMyItems = async (req, res) => {
     const parsedPage = Math.max(1, parseInt(page, 10) || 1);
     const skip = (parsedPage - 1) * parsedLimit;
 
+    const userEmail = (req.user?.email || '').toLowerCase().trim();
+
     // 1. Try Neon PostgreSQL first
     try {
-      let whereSql = 'WHERE owner_id = $1 AND status != \'removed\'';
-      const params = [String(userId)];
-      let paramIdx = 2;
+      let whereSql = 'WHERE (owner_id = $1 OR owner_id IN (SELECT id FROM users WHERE LOWER(email) = $2)) AND status != \'removed\'';
+      const params = [String(userId), userEmail];
+      let paramIdx = 3;
 
       if (category && category !== 'all') {
         whereSql += ` AND LOWER(category) = $${paramIdx++}`;
@@ -578,7 +608,23 @@ exports.getMyItems = async (req, res) => {
     }
 
     // 2. Fallback to Mongo
-    const query = { owner: userId };
+    let mongoOwnerIds = [];
+    if (mongoose.Types.ObjectId.isValid(userId)) {
+      mongoOwnerIds.push(new mongoose.Types.ObjectId(userId));
+    }
+    if (userEmail && mongoose.connection.readyState === 1) {
+      try {
+        const mUser = await User.findOne({ email: userEmail });
+        if (mUser) mongoOwnerIds.push(mUser._id);
+      } catch {}
+    }
+
+    const query = {
+      $or: [
+        { owner: { $in: mongoOwnerIds } },
+        { owner: userId }
+      ]
+    };
     if (status !== 'removed') {
       query.status = { $ne: 'removed' };
     }
@@ -1163,6 +1209,14 @@ exports.discoverItems = async (req, res) => {
           owner: item.owner
         };
       });
+
+      if (hasValidCoords && (sort === 'nearest' || !sort || sort === 'newest')) {
+        items.sort((a, b) => {
+          if (a.distanceKm === null) return 1;
+          if (b.distanceKm === null) return -1;
+          return a.distanceKm - b.distanceKm;
+        });
+      }
     }
 
     return res.status(200).json({

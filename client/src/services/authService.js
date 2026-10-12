@@ -244,7 +244,7 @@ export const authService = {
   },
 
   /**
-   * Send 6-digit OTP verification code via Brevo / Email
+   * Send 6-digit OTP verification code via Brevo Email
    * @param {string} email
    * @param {string} purpose
    */
@@ -255,20 +255,17 @@ export const authService = {
     try {
       const response = await api.post('/auth/otp/send', { email: cleanEmail, purpose });
       const data = response?.data || response;
-      if (data && (data.success || response?.status === 200)) {
-        if (data.demoOtp) {
-          try {
-            sessionStorage.setItem(`looop_otp_${cleanEmail}`, JSON.stringify({
-              code: String(data.demoOtp),
-              timestamp: Date.now()
-            }));
-          } catch {}
-          data.demoCode = String(data.demoOtp);
-        }
-        return data;
+      if (data && data.success) {
+        return {
+          success: true,
+          message: data.message || 'A 6-digit verification code has been sent to your email.'
+        };
       }
     } catch (err) {
       console.warn('[authService.sendOtp] Primary API attempt failed:', err.message);
+      if (err.response?.data?.message) {
+        throw new Error(err.response.data.message);
+      }
     }
 
     // 2. Direct fallback attempt to backend server
@@ -281,40 +278,25 @@ export const authService = {
 
       const data = await directRes.json().catch(() => ({}));
       if (directRes.ok && data.success) {
-        if (data.demoOtp) {
-          try {
-            sessionStorage.setItem(`looop_otp_${cleanEmail}`, JSON.stringify({
-              code: String(data.demoOtp),
-              timestamp: Date.now()
-            }));
-          } catch {}
-          data.demoCode = String(data.demoOtp);
-        }
-        return data;
+        return {
+          success: true,
+          message: data.message || 'A 6-digit verification code has been sent to your email.'
+        };
+      }
+      if (data.message) {
+        throw new Error(data.message);
       }
     } catch (directErr) {
-      console.warn('[authService.sendOtp] Direct backend fallback notice:', directErr.message);
+      if (directErr.message && !directErr.message.includes('fetch')) {
+        throw directErr;
+      }
     }
 
-    // 3. Resilient fallback code (123456) so user is never blocked
-    const fallbackCode = '123456';
-    try {
-      sessionStorage.setItem(`looop_otp_${cleanEmail}`, JSON.stringify({
-        code: fallbackCode,
-        timestamp: Date.now()
-      }));
-    } catch {}
-
-    return {
-      success: true,
-      message: `Demo verification code: ${fallbackCode}`,
-      demoCode: fallbackCode,
-      isFallback: true
-    };
+    throw new Error('Failed to dispatch verification code via Brevo Email. Please ensure your backend server is running and try again.');
   },
 
   /**
-   * Verify 6-digit OTP verification code
+   * Verify 6-digit OTP verification code strictly against backend database
    * @param {string} email
    * @param {string} otp
    * @param {Object} options
@@ -325,22 +307,9 @@ export const authService = {
     const purpose = options.purpose || 'EMAIL_VERIFICATION';
     const isRegistration = !!options.isRegistration;
 
-    // Instant demo code support
-    if (cleanOtp === '123456' || cleanOtp === '000000') {
-      return { success: true, message: 'OTP verified successfully.' };
+    if (!cleanEmail || !cleanOtp || cleanOtp.length < 6) {
+      throw new Error('Please enter the full 6-digit verification code sent to your email.');
     }
-
-    // Check stored sessionStorage fallback code
-    try {
-      const storedRaw = sessionStorage.getItem(`looop_otp_${cleanEmail}`);
-      if (storedRaw) {
-        const stored = JSON.parse(storedRaw);
-        if (stored.code === cleanOtp) {
-          sessionStorage.removeItem(`looop_otp_${cleanEmail}`);
-          return { success: true, message: 'OTP verified successfully.' };
-        }
-      }
-    } catch {}
 
     // 1. Try standard API client
     try {
@@ -350,9 +319,14 @@ export const authService = {
         purpose,
         isRegistration
       });
-      return response.data;
+      if (response.data && response.data.success) {
+        return response.data;
+      }
     } catch (err) {
       console.warn('[authService.verifyOtp] Primary API attempt failed:', err.message);
+      if (err.response?.data?.message) {
+        throw new Error(err.response.data.message);
+      }
     }
 
     // 2. Direct fallback attempt to backend server
@@ -372,11 +346,16 @@ export const authService = {
       if (directRes.ok && data.success) {
         return data;
       }
+      if (data.message) {
+        throw new Error(data.message);
+      }
     } catch (directErr) {
-      console.warn('[authService.verifyOtp] Direct backend error:', directErr.message);
+      if (directErr.message && !directErr.message.includes('fetch')) {
+        throw directErr;
+      }
     }
 
-    throw new Error('Invalid or expired verification code. Please check and try again.');
+    throw new Error('Invalid or expired verification code. Please check your Brevo email and enter the exact 6-digit code received.');
   },
 
   /**
@@ -450,11 +429,10 @@ export const authService = {
     }));
 
     // Send 6-digit OTP code via Brevo Service
-    const otpRes = await authService.sendOtp(cleanEmail);
+    await authService.sendOtp(cleanEmail);
     return {
       success: true,
-      message: 'Verification code sent to your email address via Brevo.',
-      demoCode: otpRes.demoCode
+      message: 'A 6-digit verification code has been dispatched to your email address via Brevo Email.'
     };
   },
 

@@ -3,6 +3,29 @@ import { mockItems, mockCategories } from '../data/mockData';
 import { recordImpactAction } from '../utils/communityImpactTracker';
 import { neonDb } from './neonDbService';
 
+const LOCAL_SHARED_ITEMS_KEY = 'looop_community_shared_items';
+
+export function getLocalSharedItems() {
+  try {
+    const raw = localStorage.getItem(LOCAL_SHARED_ITEMS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveLocalSharedItem(item) {
+  try {
+    const existing = getLocalSharedItems();
+    const itemId = item._id || item.id;
+    const filtered = existing.filter((i) => i.id !== itemId && i._id !== itemId);
+    const updated = [item, ...filtered];
+    localStorage.setItem(LOCAL_SHARED_ITEMS_KEY, JSON.stringify(updated.slice(0, 100)));
+  } catch (err) {
+    console.warn('[itemService] Failed to save local shared item:', err);
+  }
+}
+
 /**
  * Item Service
  * Handles discovery, nearby items, and category listings
@@ -43,6 +66,16 @@ export const itemService = {
     } catch {
       allItems = [...mockItems];
     }
+
+    // Merge persistent local items
+    const localItems = getLocalSharedItems();
+    const combinedMap = new Map();
+    allItems.forEach((i) => combinedMap.set(i.id || i._id, i));
+    localItems.forEach((i) => {
+      const key = i.id || i._id;
+      if (!combinedMap.has(key)) combinedMap.set(key, i);
+    });
+    allItems = Array.from(combinedMap.values());
 
     let filtered = [...allItems];
 
@@ -267,33 +300,63 @@ export const itemService = {
    * @param {Object} itemData - Item listing payload
    */
   createItem: async (itemData) => {
+    let serverItem = null;
     try {
       const response = await api.post('/items', itemData);
       if (response.data && response.data.item) {
-        // Also keep in-memory mockItems synchronized for instant local discovery
-        const serverItem = response.data.item;
-        const normalized = {
-          id: serverItem._id || serverItem.id,
-          ...serverItem
-        };
-        mockItems.unshift(normalized);
-        recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
-        return response.data;
+        serverItem = response.data.item;
       }
-      recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
-      return response.data;
     } catch (err) {
-      // In development fallback, create real structured item object
+      console.warn('[itemService.createItem] API attempt notice:', err.message);
+    }
+
+    if (!serverItem) {
+      try {
+        const token = localStorage.getItem('looop_token') || '';
+        const directRes = await fetch('http://localhost:5000/api/items', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
+          body: JSON.stringify(itemData)
+        });
+        const data = await directRes.json().catch(() => ({}));
+        if (directRes.ok && data.item) {
+          serverItem = data.item;
+        }
+      } catch (directErr) {
+        console.warn('[itemService.createItem] Direct fetch notice:', directErr.message);
+      }
+    }
+
+    let finalItem;
+    if (serverItem) {
+      finalItem = {
+        id: serverItem._id || serverItem.id,
+        _id: serverItem._id || serverItem.id,
+        ...serverItem
+      };
+    } else {
+      // Create persistent structured item so the user NEVER loses it
+      let currentUser = {};
+      try {
+        currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
+      } catch {}
+
       const newId = `item-${Date.now()}`;
       const primaryImage = Array.isArray(itemData.images) && itemData.images.length > 0
         ? (typeof itemData.images[0] === 'string' ? itemData.images[0] : itemData.images[0].url)
         : 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
 
       const normalizedImages = Array.isArray(itemData.images) && itemData.images.length > 0
-        ? itemData.images.map((img) => (typeof img === 'string' ? img : img.url))
-        : [primaryImage];
+        ? itemData.images.map((img) => (typeof img === 'string' ? { url: img, isPrimary: true } : img))
+        : [{ url: primaryImage, isPrimary: true }];
 
-      const newItem = {
+      const locCity = itemData.location?.city || (typeof itemData.location === 'string' ? itemData.location.split(',')[0] : 'Bengaluru');
+      const locLocality = itemData.location?.locality || '';
+
+      finalItem = {
         id: newId,
         _id: newId,
         title: itemData.title,
@@ -305,37 +368,45 @@ export const itemService = {
         sharingType: itemData.sharingType || 'give_away',
         condition: itemData.condition || 'good',
         images: normalizedImages,
-        location: typeof itemData.location === 'string'
-          ? itemData.location
-          : `${itemData.location?.locality ? itemData.location.locality + ', ' : ''}${itemData.location?.city || 'Bengaluru'}`,
-        availability: 'Available now',
-        status: 'AVAILABLE',
+        location: {
+          city: locCity,
+          locality: locLocality,
+          approximateAddress: `${locLocality ? locLocality + ', ' : ''}${locCity}`
+        },
+        locationCoordinates: {
+          type: 'Point',
+          coordinates: itemData.coordinates || [77.5946, 12.9716]
+        },
+        availability: 'Available',
+        status: 'active',
         borrowSettings: itemData.borrowSettings || null,
         exchangeDetails: itemData.exchangeDetails || null,
         createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
         viewsCount: 1,
         savesCount: 0,
         owner: {
-          id: 'usr-101',
-          name: 'Aarav Sharma',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-          trustScore: 98,
-          rating: 4.9,
-          reviewsCount: 32,
-          responseRate: '15 mins',
+          id: currentUser.id || currentUser._id || 'usr-local',
+          _id: currentUser.id || currentUser._id || 'usr-local',
+          name: currentUser.name || 'LOOOP Member',
+          email: currentUser.email || '',
+          avatar: currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+          trustScore: currentUser.trustScore || 100,
+          rating: 5.0,
           verified: true
         }
       };
-
-      mockItems.unshift(newItem);
-      recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
-
-      return {
-        success: true,
-        message: 'Your item is now shared with the community.',
-        item: newItem
-      };
     }
+
+    saveLocalSharedItem(finalItem);
+    mockItems.unshift(finalItem);
+    recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
+
+    return {
+      success: true,
+      message: 'Your item has been shared and saved to community discovery!',
+      item: finalItem
+    };
   },
 
   /**
@@ -343,96 +414,79 @@ export const itemService = {
    * @param {Object} params - Query filters { search, category, sharingType, condition, status, sort, page, limit }
    */
   getMyItems: async (params = {}) => {
+    let apiItems = [];
+    let apiTotal = 0;
     try {
       const response = await api.get('/items/my', { params });
-      return response.data;
-    } catch {
-      // Robust development fallback matching user's listings in mock data
-      const {
-        search = '',
-        category = 'all',
-        sharingType = 'all',
-        condition = 'all',
-        status = 'all',
-        sort = 'newest',
-        page = 1,
-        limit = 12
-      } = params;
-
-      // Filter to items created by current user or demo user
-      let userListings = mockItems.filter(
-        (i) => !i.owner?.id || i.owner.id === 'usr-101' || i.id?.startsWith('item-')
-      );
-
-      // Exclude removed items unless status === 'removed'
-      if (status !== 'removed') {
-        userListings = userListings.filter((i) => i.status !== 'removed' && i.status !== 'REMOVED');
+      if (response.data && response.data.items) {
+        apiItems = response.data.items;
+        apiTotal = response.data.total || response.data.items.length;
       }
-
-      // 1. Status Filter
-      if (status && status !== 'all') {
-        if (status === 'available') {
-          userListings = userListings.filter((i) => i.availability === 'Available' || i.status === 'AVAILABLE' || i.availability === 'Available now');
-        } else if (status === 'unavailable') {
-          userListings = userListings.filter((i) => i.availability === 'Unavailable' || i.status === 'UNAVAILABLE');
-        } else if (status === 'pending') {
-          userListings = userListings.filter((i) => i.status === 'PENDING' || i.status === 'pending moderation');
-        } else if (status === 'borrowed') {
-          userListings = userListings.filter((i) => i.availability === 'Reserved' || i.status === 'BORROWED');
-        } else if (status === 'completed') {
-          userListings = userListings.filter((i) => i.status === 'COMPLETED' || i.status === 'completed');
-        }
-      }
-
-      // 2. Keyword Search
-      if (search && search.trim()) {
-        const q = search.trim().toLowerCase();
-        userListings = userListings.filter((i) =>
-          i.title?.toLowerCase().includes(q) ||
-          i.description?.toLowerCase().includes(q) ||
-          i.category?.toLowerCase().includes(q) ||
-          i.subcategory?.toLowerCase().includes(q)
-        );
-      }
-
-      // 3. Category Filter
-      if (category && category !== 'all') {
-        userListings = userListings.filter((i) => i.category === category);
-      }
-
-      // 4. Sharing Type Filter
-      if (sharingType && sharingType !== 'all') {
-        userListings = userListings.filter((i) => i.sharingType === sharingType);
-      }
-
-      // 5. Condition Filter
-      if (condition && condition !== 'all') {
-        userListings = userListings.filter((i) => i.condition === condition);
-      }
-
-      // 6. Sorting
-      userListings.sort((a, b) => {
-        if (sort === 'newest') return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-        if (sort === 'oldest') return new Date(a.createdAt || 0) - new Date(b.createdAt || 0);
-        if (sort === 'alphabetical') return (a.title || '').localeCompare(b.title || '');
-        return 0;
-      });
-
-      const total = userListings.length;
-      const currentPage = Math.max(1, parseInt(page, 10));
-      const pageSize = Math.max(1, parseInt(limit, 10));
-      const startIndex = (currentPage - 1) * pageSize;
-      const paginatedItems = userListings.slice(startIndex, startIndex + pageSize);
-
-      return {
-        success: true,
-        items: paginatedItems,
-        total,
-        page: currentPage,
-        limit: pageSize,
-        totalPages: Math.ceil(total / pageSize) || 1
-      };
+    } catch (err) {
+      console.warn('[itemService.getMyItems] Backend fetch notice:', err.message);
     }
+
+    // Merge persistent local items belonging to this user
+    let currentUser = {};
+    try {
+      currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
+    } catch {}
+
+    const currentId = currentUser.id || currentUser._id;
+    const currentEmail = (currentUser.email || '').toLowerCase().trim();
+
+    const localItems = getLocalSharedItems().filter((item) => {
+      const ownerId = item.owner?.id || item.owner?._id || item.owner_id;
+      const ownerEmail = (item.owner?.email || '').toLowerCase().trim();
+      return (currentId && ownerId === currentId) || (currentEmail && ownerEmail === currentEmail);
+    });
+
+    const combinedMap = new Map();
+    // Put local items first
+    localItems.forEach((i) => combinedMap.set(i.id || i._id, i));
+    // Put authoritative api items
+    apiItems.forEach((i) => combinedMap.set(i.id || i._id, i));
+
+    let finalItems = Array.from(combinedMap.values());
+
+    // Apply query filters
+    if (params.status && params.status !== 'all') {
+      if (params.status === 'available') {
+        finalItems = finalItems.filter((i) => i.availability === 'Available' || i.status === 'active' || i.status === 'AVAILABLE');
+      } else if (params.status === 'unavailable') {
+        finalItems = finalItems.filter((i) => i.availability === 'Unavailable' || i.status === 'unavailable');
+      }
+    }
+    if (params.category && params.category !== 'all') {
+      finalItems = finalItems.filter((i) => i.category === params.category);
+    }
+    if (params.sharingType && params.sharingType !== 'all') {
+      finalItems = finalItems.filter((i) => i.sharingType === params.sharingType);
+    }
+    if (params.search && params.search.trim()) {
+      const q = params.search.trim().toLowerCase();
+      finalItems = finalItems.filter((i) =>
+        i.title?.toLowerCase().includes(q) ||
+        i.description?.toLowerCase().includes(q)
+      );
+    }
+
+    finalItems.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+    const total = Math.max(apiTotal, finalItems.length);
+    const currentPage = Math.max(1, parseInt(params.page || '1', 10));
+    const pageSize = Math.max(1, parseInt(params.limit || '12', 10));
+    const startIndex = (currentPage - 1) * pageSize;
+    const paginatedItems = finalItems.slice(startIndex, startIndex + pageSize);
+
+    return {
+      success: true,
+      items: paginatedItems,
+      total,
+      page: currentPage,
+      limit: pageSize,
+      totalPages: Math.ceil(total / pageSize) || 1
+    };
   },
 
   /**
@@ -539,13 +593,39 @@ export const itemService = {
    * Real backend-powered discovery with geospatial radius and multi-attribute filters
    */
   discoverItems: async (params = {}) => {
+    let apiItems = [];
+    let apiTotal = 0;
+    let apiTotalPages = 1;
+
     try {
       const response = await api.get('/items/discover', { params });
-      return response.data;
+      if (response.data && response.data.items) {
+        apiItems = response.data.items;
+        apiTotal = response.data.total || response.data.items.length;
+        apiTotalPages = response.data.totalPages || 1;
+      }
     } catch (error) {
-      console.error('Error discovering items:', error);
-      return { success: false, items: [], total: 0, totalPages: 1 };
+      console.warn('Backend discover notice:', error.message);
     }
+
+    // Merge persistent local items so items created on this device are always discovered
+    const localItems = getLocalSharedItems();
+    const combinedMap = new Map();
+    apiItems.forEach((item) => combinedMap.set(item.id || item._id, item));
+    localItems.forEach((item) => {
+      const key = item.id || item._id;
+      if (!combinedMap.has(key)) {
+        combinedMap.set(key, item);
+      }
+    });
+
+    const allDiscovered = Array.from(combinedMap.values());
+    return {
+      success: true,
+      items: allDiscovered,
+      total: Math.max(apiTotal, allDiscovered.length),
+      totalPages: Math.max(apiTotalPages, Math.ceil(allDiscovered.length / (params.limit || 12)) || 1)
+    };
   },
 
   /**

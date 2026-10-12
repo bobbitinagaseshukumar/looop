@@ -154,23 +154,20 @@ export const LoginPage = () => {
         setPendingSession(response);
         // 2. Dispatch Brevo Email OTP code for 2-step login verification
         try {
-          const otpRes = await authService.sendOtp(email.trim());
+          await authService.sendOtp(email.trim());
           setOtpEmail(email.trim());
           setLoginStep('otp');
           setOtpDigits(['', '', '', '', '', '']);
           setOtpCountdown(60);
           addToast({
             title: 'Verification Code Dispatched',
-            message: otpRes?.demoCode
-              ? `Verification code: ${otpRes.demoCode}`
-              : `A 6-digit login OTP code has been sent to ${email.trim()} via Brevo Email.`,
+            message: `A 6-digit login OTP code has been sent to ${email.trim()} via Brevo Email. Please check your inbox or spam folder.`,
             variant: 'info'
           });
           setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
         } catch (otpErr) {
           console.warn('OTP dispatch notice:', otpErr?.message);
-          // If OTP service is temporarily offline, log in directly since password was verified
-          handleAuthSuccess(response.user, response.token, response.user.name);
+          setServerError(otpErr.message || 'Failed to dispatch login verification code via Brevo Email. Please try again.');
         }
       } else {
         throw new Error('Invalid response from authentication server.');
@@ -278,15 +275,13 @@ export const LoginPage = () => {
 
     setIsSendingOtp(true);
     try {
-      const otpRes = await authService.sendOtp(targetEmail);
+      await authService.sendOtp(targetEmail);
       setOtpSent(true);
       setOtpDigits(['', '', '', '', '', '']);
       setOtpCountdown(60);
       addToast({
         title: 'Verification Code Dispatched',
-        message: otpRes?.demoCode
-          ? `Verification code: ${otpRes.demoCode}`
-          : `A 6-digit OTP code has been sent to ${targetEmail} via Brevo Email.`,
+        message: `A new 6-digit verification code has been dispatched to ${targetEmail} via Brevo Email. Please check your inbox or spam folder.`,
         variant: 'info'
       });
       setTimeout(() => otpInputRefs.current[0]?.focus(), 150);

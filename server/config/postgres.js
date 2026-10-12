@@ -5,6 +5,9 @@ const path = require('path');
 let pool = null;
 let isConnected = false;
 let dbInfo = { host: null, database: null, version: null };
+let tablesInitialized = false;
+let lastConnectionAttempt = 0;
+const RECONNECT_COOLDOWN_MS = 30000;
 
 const DEFAULT_NEON_URL = 'postgresql://neondb_owner:npg_PzhnYria0G2e@ep-small-wind-b4hjagr6-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require';
 
@@ -23,7 +26,7 @@ const getPoolConfig = () => {
       ssl: isSslRequired ? { rejectUnauthorized: false } : false,
       max: parseInt(process.env.PG_MAX_POOL || '20', 10),
       idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 5000
+      connectionTimeoutMillis: 10000
     };
   }
 
@@ -37,7 +40,7 @@ const getPoolConfig = () => {
     ssl: process.env.DATABASE_SSL === 'true' ? { rejectUnauthorized: false } : false,
     max: parseInt(process.env.PG_MAX_POOL || '20', 10),
     idleTimeoutMillis: 30000,
-    connectionTimeoutMillis: 5000
+    connectionTimeoutMillis: 10000
   };
 };
 
@@ -63,12 +66,15 @@ const connectPostgres = async () => {
       console.log(`[PostgreSQL] Connected successfully to database: ${dbInfo.database}`);
       console.log(`[PostgreSQL] Engine: ${row?.version?.slice(0, 45)}...`);
 
-      // Initialize tables from initPostgres.sql if configured or needed
-      const initSqlPath = path.resolve(__dirname, '../scripts/initPostgres.sql');
-      if (fs.existsSync(initSqlPath)) {
-        const sql = fs.readFileSync(initSqlPath, 'utf8');
-        await client.query(sql);
-        console.log('[PostgreSQL] Database tables and indexes verified/initialized.');
+      // Initialize tables from initPostgres.sql once on startup
+      if (!tablesInitialized) {
+        const initSqlPath = path.resolve(__dirname, '../scripts/initPostgres.sql');
+        if (fs.existsSync(initSqlPath)) {
+          const sql = fs.readFileSync(initSqlPath, 'utf8');
+          await client.query(sql);
+          console.log('[PostgreSQL] Database tables and indexes verified/initialized.');
+          tablesInitialized = true;
+        }
       }
     } finally {
       client.release();
@@ -77,12 +83,14 @@ const connectPostgres = async () => {
     pool.on('error', (err) => {
       console.error('[PostgreSQL] Unexpected pool error on idle client:', err.message);
       isConnected = false;
+      lastConnectionAttempt = Date.now();
     });
 
     return pool;
   } catch (err) {
     console.error(`[PostgreSQL] Connection failure: ${err.message}`);
     isConnected = false;
+    lastConnectionAttempt = Date.now();
     return null;
   }
 };
@@ -300,8 +308,12 @@ function mockQueryEvaluator(text, params = []) {
  * Execute parameterized SQL query with live DB connection or resilient fallback
  */
 const query = async (text, params = []) => {
+  const now = Date.now();
   if (!pool || !isConnected) {
-    await connectPostgres();
+    if (now - lastConnectionAttempt > RECONNECT_COOLDOWN_MS) {
+      lastConnectionAttempt = now;
+      await connectPostgres();
+    }
   }
 
   if (pool && isConnected) {
@@ -315,6 +327,16 @@ const query = async (text, params = []) => {
       return res;
     } catch (dbErr) {
       console.error('[PostgreSQL Query Error]:', dbErr.message);
+      if (
+        dbErr.code === 'ECONNRESET' ||
+        dbErr.code === '57P01' ||
+        dbErr.message.includes('timeout') ||
+        dbErr.message.includes('closed') ||
+        dbErr.message.includes('terminated')
+      ) {
+        isConnected = false;
+        lastConnectionAttempt = Date.now();
+      }
       throw dbErr;
     }
   }

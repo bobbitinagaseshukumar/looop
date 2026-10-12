@@ -578,8 +578,7 @@ exports.sendOtp = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'A 6-digit verification code has been sent to your email.',
-      demoOtp: otpRes.rawOtp
+      message: 'A 6-digit verification code has been sent to your email.'
     });
   } catch (error) {
     console.error('[AUTH] sendOtp error:', error);
@@ -609,7 +608,7 @@ exports.verifyOtp = async (req, res) => {
       });
     }
 
-    // Look up user
+    // Look up user in PostgreSQL first
     let user = null;
     try {
       const pgRes = await pgQuery('SELECT id, name, email, role, avatar FROM users WHERE LOWER(email) = $1', [cleanEmail]);
@@ -617,6 +616,23 @@ exports.verifyOtp = async (req, res) => {
         user = pgRes.rows[0];
       }
     } catch {}
+
+    // Check MongoDB if not found in PG
+    if (!user && mongoose.connection && mongoose.connection.readyState === 1) {
+      try {
+        const mongoDoc = await User.findOne({ email: cleanEmail });
+        if (mongoDoc) {
+          user = {
+            id: String(mongoDoc._id),
+            _id: String(mongoDoc._id),
+            name: mongoDoc.name,
+            email: mongoDoc.email,
+            role: mongoDoc.role,
+            avatar: mongoDoc.avatar
+          };
+        }
+      } catch {}
+    }
 
     if (!user) {
       return res.status(200).json({
