@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import {
   BookOpen,
@@ -11,19 +11,46 @@ import {
   Home,
   ArrowRight
 } from 'lucide-react';
+import itemService from '../../services/itemService';
 
 const CATEGORIES = [
-  { id: 'education', name: 'Study Materials', icon: GraduationCap, color: '#059669', bg: '#ecfdf5', count: '48 items' },
-  { id: 'books', name: 'Books & Notes', icon: BookOpen, color: '#0284c7', bg: '#f0f9ff', count: '42 items' },
-  { id: 'electronics', name: 'Electronics', icon: Laptop, color: '#7c3aed', bg: '#f5f3ff', count: '38 items' },
-  { id: 'tools', name: 'Tools & DIY', icon: Wrench, color: '#d97706', bg: '#fffbeb', count: '19 items' },
-  { id: 'furniture', name: 'Furniture', icon: Armchair, color: '#ea580c', bg: '#fff7ed', count: '24 items' },
-  { id: 'sports', name: 'Sports & Fitness', icon: Trophy, color: '#16a34a', bg: '#f0fdf4', count: '29 items' },
-  { id: 'clothes', name: 'Clothing', icon: Shirt, color: '#db2777', bg: '#fdf2f8', count: '56 items' },
-  { id: 'kitchen', name: 'Home & Kitchen', icon: Home, color: '#4f46e5', bg: '#eef2ff', count: '35 items' }
+  { id: 'education', name: 'Study Materials', icon: GraduationCap, color: '#059669', bg: '#ecfdf5' },
+  { id: 'books', name: 'Books & Notes', icon: BookOpen, color: '#0284c7', bg: '#f0f9ff' },
+  { id: 'electronics', name: 'Electronics', icon: Laptop, color: '#7c3aed', bg: '#f5f3ff' },
+  { id: 'tools', name: 'Tools & DIY', icon: Wrench, color: '#d97706', bg: '#fffbeb' },
+  { id: 'furniture', name: 'Furniture', icon: Armchair, color: '#ea580c', bg: '#fff7ed' },
+  { id: 'sports', name: 'Sports & Fitness', icon: Trophy, color: '#16a34a', bg: '#f0fdf4' },
+  { id: 'clothing', name: 'Clothing', icon: Shirt, color: '#db2777', bg: '#fdf2f8' },
+  { id: 'home', name: 'Home & Kitchen', icon: Home, color: '#4f46e5', bg: '#eef2ff' }
 ];
 
 export const CategoryShortcuts = () => {
+  const [counts, setCounts] = useState({});
+
+  useEffect(() => {
+    let isMounted = true;
+    itemService
+      .getCategories()
+      .then((res) => {
+        if (!isMounted) return;
+        if (res && res.categoryCounts) {
+          setCounts(res.categoryCounts);
+        } else if (res && Array.isArray(res.categories)) {
+          const map = {};
+          res.categories.forEach((c) => {
+            if (c.id && typeof c.count === 'number') {
+              map[c.id] = c.count;
+            }
+          });
+          setCounts(map);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
@@ -107,9 +134,11 @@ export const CategoryShortcuts = () => {
                   <div style={{ fontSize: '0.825rem', fontWeight: 700, color: 'var(--color-slate-800)', lineHeight: 1.2 }}>
                     {cat.name}
                   </div>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--color-slate-400)', fontWeight: 500 }}>
-                    {cat.count}
-                  </span>
+                  {counts[cat.id] > 0 && (
+                    <span style={{ fontSize: '0.7rem', color: 'var(--color-slate-400)', fontWeight: 500 }}>
+                      {counts[cat.id]} {counts[cat.id] === 1 ? 'item' : 'items'}
+                    </span>
+                  )}
                 </div>
               </div>
             </Link>

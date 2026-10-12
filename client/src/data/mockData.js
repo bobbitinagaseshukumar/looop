@@ -4,15 +4,15 @@
  */
 
 export const mockCategories = [
-  { id: 'books', name: 'Books & Literature', icon: 'BookOpen', count: 42 },
-  { id: 'electronics', name: 'Electronics & Gadgets', icon: 'Laptop', count: 38 },
-  { id: 'clothes', name: 'Clothes & Apparel', icon: 'Shirt', count: 56 },
-  { id: 'furniture', name: 'Furniture & Living', icon: 'Armchair', count: 24 },
-  { id: 'games', name: 'Games & Hobbies', icon: 'Gamepad2', count: 31 },
-  { id: 'sports', name: 'Sports & Fitness', icon: 'Trophy', count: 29 },
-  { id: 'kitchen', name: 'Kitchen & Dining', icon: 'Utensils', count: 35 },
-  { id: 'education', name: 'Education & Study', icon: 'GraduationCap', count: 48 },
-  { id: 'tools', name: 'Tools & DIY', icon: 'Wrench', count: 19 }
+  { id: 'books', name: 'Books & Literature', icon: 'BookOpen', count: 0 },
+  { id: 'electronics', name: 'Electronics & Gadgets', icon: 'Laptop', count: 0 },
+  { id: 'clothes', name: 'Clothes & Apparel', icon: 'Shirt', count: 0 },
+  { id: 'furniture', name: 'Furniture & Living', icon: 'Armchair', count: 0 },
+  { id: 'games', name: 'Games & Hobbies', icon: 'Gamepad2', count: 0 },
+  { id: 'sports', name: 'Sports & Fitness', icon: 'Trophy', count: 0 },
+  { id: 'kitchen', name: 'Kitchen & Dining', icon: 'Utensils', count: 0 },
+  { id: 'education', name: 'Education & Study', icon: 'GraduationCap', count: 0 },
+  { id: 'tools', name: 'Tools & DIY', icon: 'Wrench', count: 0 }
 ];
 
 export const mockUsers = {

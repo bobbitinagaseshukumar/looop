@@ -70,9 +70,38 @@ export const BrowsePage = () => {
   const [items, setItems] = useState([]);
   const [similarAlternatives, setSimilarAlternatives] = useState([]);
   const [totalItems, setTotalItems] = useState(0);
+  const [categoryCounts, setCategoryCounts] = useState({});
   const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Load live category counts from database
+  useEffect(() => {
+    let isMounted = true;
+    itemService
+      .getCategories()
+      .then((res) => {
+        if (!isMounted) return;
+        if (res && res.categoryCounts) {
+          setCategoryCounts(res.categoryCounts);
+        } else if (res && Array.isArray(res.categories)) {
+          const map = {};
+          res.categories.forEach((c) => {
+            if (c.id && typeof c.count === 'number') {
+              map[c.id] = c.count;
+            }
+          });
+          setCategoryCounts(map);
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to load category counts:', err);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   // Synchronize local search input if URL search param changes externally (e.g. back/forward)
   useEffect(() => {
@@ -453,6 +482,8 @@ export const BrowsePage = () => {
       <CategoryBar
         selectedCategory={categoryParam}
         onSelectCategory={(catId) => updateFilterParam('category', catId)}
+        categoryCounts={categoryCounts}
+        totalItems={totalItems}
       />
 
       {/* 4. Controls Bar: Result Count, View Toggle, Mobile Filter & Sort */}
@@ -679,6 +710,7 @@ export const BrowsePage = () => {
             }}
             onResetFilters={handleClearAllFilters}
             totalItems={totalItems}
+            categoryCounts={categoryCounts}
             isMobile={false}
           />
 

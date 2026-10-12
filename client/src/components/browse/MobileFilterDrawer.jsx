@@ -9,7 +9,8 @@ export const MobileFilterDrawer = ({
   filters,
   onFilterChange,
   onResetFilters,
-  totalItems = 0
+  totalItems = 0,
+  categoryCounts = {}
 }) => {
   if (!isOpen) return null;
 
@@ -89,6 +90,7 @@ export const MobileFilterDrawer = ({
             onFilterChange={onFilterChange}
             onResetFilters={onResetFilters}
             totalItems={totalItems}
+            categoryCounts={categoryCounts}
             isMobile={true}
           />
         </div>

@@ -1,6 +1,7 @@
 import api from './api';
 import { mockItems, mockCategories } from '../data/mockData';
 import { recordImpactAction } from '../utils/communityImpactTracker';
+import { neonDb } from './neonDbService';
 
 /**
  * Item Service
@@ -153,14 +154,30 @@ export const itemService = {
   },
 
   /**
-   * Fetch categories list
+   * Fetch categories list with real item counts
    */
   getCategories: async () => {
     try {
       const response = await api.get('/categories');
+      if (response?.data?.categoryCounts) {
+        return response.data;
+      }
       return response.data;
     } catch {
-      return mockCategories;
+      try {
+        const counts = await neonDb.getCategoryCounts();
+        return {
+          success: true,
+          categoryCounts: counts,
+          categories: mockCategories.map((c) => ({ ...c, count: counts[c.id] || 0 }))
+        };
+      } catch {
+        return {
+          success: true,
+          categoryCounts: {},
+          categories: mockCategories.map((c) => ({ ...c, count: 0 }))
+        };
+      }
     }
   },
 

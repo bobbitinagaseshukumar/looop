@@ -13,6 +13,7 @@ export const FilterPanel = ({
   onFilterChange,
   onResetFilters,
   totalItems = 0,
+  categoryCounts = {},
   isMobile = false
 }) => {
   const {
@@ -110,12 +111,19 @@ export const FilterPanel = ({
           }}
           className="filter-select"
         >
-          <option value="all">All Categories</option>
-          {CATEGORIES.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name} ({c.count})
-            </option>
-          ))}
+          <option value="all">
+            All Categories{totalItems > 0 ? ` (${totalItems})` : ''}
+          </option>
+          {CATEGORIES.map((c) => {
+            const count = (categoryCounts && categoryCounts[c.id] !== undefined)
+              ? categoryCounts[c.id]
+              : (c.count || 0);
+            return (
+              <option key={c.id} value={c.id}>
+                {c.name}{count > 0 ? ` (${count})` : ''}
+              </option>
+            );
+          })}
         </select>
       </div>
 

@@ -22,17 +22,17 @@ import {
  * Structured for direct alignment with MongoDB Category model
  */
 export const CATEGORIES = [
-  { id: 'books', name: 'Books', icon: BookOpen, count: 42, color: '#0284c7', bg: '#f0f9ff' },
-  { id: 'electronics', name: 'Electronics', icon: Laptop, count: 38, color: '#7c3aed', bg: '#f5f3ff' },
-  { id: 'education', name: 'Study Materials', icon: GraduationCap, count: 48, color: '#059669', bg: '#ecfdf5' },
-  { id: 'furniture', name: 'Furniture', icon: Armchair, count: 24, color: '#ea580c', bg: '#fff7ed' },
-  { id: 'clothing', name: 'Clothing', icon: Shirt, count: 56, color: '#db2777', bg: '#fdf2f8' },
-  { id: 'sports', name: 'Sports', icon: Trophy, count: 29, color: '#16a34a', bg: '#f0fdf4' },
-  { id: 'tools', name: 'Tools', icon: Wrench, count: 19, color: '#d97706', bg: '#fffbeb' },
-  { id: 'home', name: 'Home Items', icon: Home, count: 35, color: '#4f46e5', bg: '#eef2ff' },
-  { id: 'accessories', name: 'Accessories', icon: Watch, count: 16, color: '#0891b2', bg: '#ecfeff' },
-  { id: 'mobility', name: 'Vehicles / Mobility', icon: Bike, count: 12, color: '#0d9488', bg: '#f0fdfa' },
-  { id: 'other', name: 'Other', icon: Package, count: 22, color: '#64748b', bg: '#f8fafc' }
+  { id: 'books', name: 'Books', icon: BookOpen, count: 0, color: '#0284c7', bg: '#f0f9ff' },
+  { id: 'electronics', name: 'Electronics', icon: Laptop, count: 0, color: '#7c3aed', bg: '#f5f3ff' },
+  { id: 'education', name: 'Study Materials', icon: GraduationCap, count: 0, color: '#059669', bg: '#ecfdf5' },
+  { id: 'furniture', name: 'Furniture', icon: Armchair, count: 0, color: '#ea580c', bg: '#fff7ed' },
+  { id: 'clothing', name: 'Clothing', icon: Shirt, count: 0, color: '#db2777', bg: '#fdf2f8' },
+  { id: 'sports', name: 'Sports', icon: Trophy, count: 0, color: '#16a34a', bg: '#f0fdf4' },
+  { id: 'tools', name: 'Tools', icon: Wrench, count: 0, color: '#d97706', bg: '#fffbeb' },
+  { id: 'home', name: 'Home Items', icon: Home, count: 0, color: '#4f46e5', bg: '#eef2ff' },
+  { id: 'accessories', name: 'Accessories', icon: Watch, count: 0, color: '#0891b2', bg: '#ecfeff' },
+  { id: 'mobility', name: 'Vehicles / Mobility', icon: Bike, count: 0, color: '#0d9488', bg: '#f0fdfa' },
+  { id: 'other', name: 'Other', icon: Package, count: 0, color: '#64748b', bg: '#f8fafc' }
 ];
 
 export const SUBCATEGORIES_MAP = {

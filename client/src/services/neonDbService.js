@@ -39,6 +39,39 @@ export const neonDb = {
   },
 
   /**
+   * Fetch active item counts grouped by canonical category
+   */
+  getCategoryCounts: async () => {
+    try {
+      const res = await neonDb.query(
+        "SELECT category, COUNT(*)::int as count FROM items WHERE LOWER(status) = 'active' GROUP BY category;"
+      );
+      if (res && res.rows && res.rows.length > 0) {
+        const counts = {};
+        res.rows.forEach((r) => {
+          const raw = String(r.category || '').toLowerCase().trim();
+          const count = parseInt(r.count, 10) || 0;
+          if (raw.includes('book') || raw.includes('media')) counts.books = (counts.books || 0) + count;
+          else if (raw.includes('elect') || raw.includes('gadget')) counts.electronics = (counts.electronics || 0) + count;
+          else if (raw.includes('study') || raw.includes('educat')) counts.education = (counts.education || 0) + count;
+          else if (raw.includes('furn')) counts.furniture = (counts.furniture || 0) + count;
+          else if (raw.includes('cloth') || raw.includes('apparel')) counts.clothing = (counts.clothing || 0) + count;
+          else if (raw.includes('sport') || raw.includes('outdoor')) counts.sports = (counts.sports || 0) + count;
+          else if (raw.includes('tool') || raw.includes('diy')) counts.tools = (counts.tools || 0) + count;
+          else if (raw.includes('home') || raw.includes('living') || raw.includes('kitchen')) counts.home = (counts.home || 0) + count;
+          else if (raw.includes('access')) counts.accessories = (counts.accessories || 0) + count;
+          else if (raw.includes('mobil') || raw.includes('vehic') || raw.includes('cycle') || raw.includes('bike')) counts.mobility = (counts.mobility || 0) + count;
+          else counts.other = (counts.other || 0) + count;
+        });
+        return counts;
+      }
+      return {};
+    } catch {
+      return {};
+    }
+  },
+
+  /**
    * Save or update user account in Neon PostgreSQL users table with ALL details
    */
   saveUser: async (user, passwordInput = 'DefaultSecret123!', failOnDuplicate = false) => {

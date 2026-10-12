@@ -1,8 +1,46 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { LayoutGrid } from 'lucide-react';
 import { CATEGORIES } from '../../constants/categories';
+import itemService from '../../services/itemService';
 
-export const CategoryBar = ({ selectedCategory, onSelectCategory }) => {
+export const CategoryBar = ({
+  selectedCategory,
+  onSelectCategory,
+  categoryCounts: propCounts,
+  totalItems
+}) => {
+  const [counts, setCounts] = useState(propCounts || {});
+
+  useEffect(() => {
+    if (propCounts && Object.keys(propCounts).length > 0) {
+      setCounts(propCounts);
+      return;
+    }
+
+    let isMounted = true;
+    itemService
+      .getCategories()
+      .then((res) => {
+        if (!isMounted) return;
+        if (res && res.categoryCounts) {
+          setCounts(res.categoryCounts);
+        } else if (res && Array.isArray(res.categories)) {
+          const map = {};
+          res.categories.forEach((c) => {
+            if (c.id && typeof c.count === 'number') {
+              map[c.id] = c.count;
+            }
+          });
+          setCounts(map);
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      isMounted = false;
+    };
+  }, [propCounts]);
+
   return (
     <div
       style={{
@@ -41,12 +79,27 @@ export const CategoryBar = ({ selectedCategory, onSelectCategory }) => {
       >
         <LayoutGrid size={15} color={selectedCategory === 'all' ? '#059669' : 'var(--color-slate-500)'} />
         <span>All Items</span>
+        {typeof totalItems === 'number' && totalItems > 0 && (
+          <span
+            style={{
+              fontSize: '0.7rem',
+              color: selectedCategory === 'all' ? '#059669' : 'var(--color-slate-400)',
+              marginLeft: '2px',
+              fontWeight: 500
+            }}
+          >
+            {totalItems}
+          </span>
+        )}
       </button>
 
       {/* Category Pills */}
       {CATEGORIES.map((cat) => {
         const isSelected = selectedCategory === cat.id;
         const Icon = cat.icon;
+        const itemCount = (counts && counts[cat.id] !== undefined)
+          ? counts[cat.id]
+          : (cat.count || 0);
 
         return (
           <button
@@ -74,16 +127,18 @@ export const CategoryBar = ({ selectedCategory, onSelectCategory }) => {
           >
             <Icon size={15} color={isSelected ? '#059669' : 'var(--color-slate-500)'} />
             <span>{cat.name}</span>
-            <span
-              style={{
-                fontSize: '0.7rem',
-                color: isSelected ? '#059669' : 'var(--color-slate-400)',
-                marginLeft: '2px',
-                fontWeight: 500
-              }}
-            >
-              {cat.count}
-            </span>
+            {itemCount > 0 && (
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  color: isSelected ? '#059669' : 'var(--color-slate-400)',
+                  marginLeft: '2px',
+                  fontWeight: 500
+                }}
+              >
+                {itemCount}
+              </span>
+            )}
           </button>
         );
       })}
