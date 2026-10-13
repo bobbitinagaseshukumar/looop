@@ -67,16 +67,38 @@ export const itemService = {
         }));
 
         // Merge any newly created local items by this customer to ensure zero latency
-        const localItems = getLocalSharedItems();
+        const localItems = getLocalSharedItems().filter((localItem) => {
+          if (params.category && params.category !== 'all') {
+            const cat = (localItem.category || '').toLowerCase();
+            const pCat = params.category.toLowerCase();
+            if (pCat === 'education' || pCat === 'books') {
+              if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
+            } else if (!cat.includes(pCat)) {
+              return false;
+            }
+          }
+          if (params.search && params.search.trim()) {
+            const q = params.search.trim().toLowerCase();
+            const t = (localItem.title || '').toLowerCase();
+            const d = (localItem.description || '').toLowerCase();
+            if (!t.includes(q) && !d.includes(q)) return false;
+          }
+          return true;
+        });
+
         if (localItems.length > 0) {
           const itemMap = new Map();
-          localItems.forEach((i) => {
-            const key = i.id || i._id;
-            if (key) itemMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
-          });
+          // Put authoritative backend items
           items.forEach((i) => {
             const key = i.id || i._id;
             if (key) itemMap.set(key, i);
+          });
+          // Add local items if not yet present in DB response
+          localItems.forEach((i) => {
+            const key = i.id || i._id;
+            if (key && !itemMap.has(key)) {
+              itemMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
+            }
           });
           const combined = Array.from(itemMap.values());
           return {
@@ -138,11 +160,34 @@ export const itemService = {
         images: (item.images || []).map(normalizeImageUrl)
       }));
 
-      // Merge persistent local items
-      const localItems = getLocalSharedItems();
+      // Merge persistent local items matching active filters
+      const localItems = getLocalSharedItems().filter((localItem) => {
+        if (params.category && params.category !== 'all') {
+          const cat = (localItem.category || '').toLowerCase();
+          const pCat = params.category.toLowerCase();
+          if (pCat === 'education' || pCat === 'books') {
+            if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
+          } else if (!cat.includes(pCat)) {
+            return false;
+          }
+        }
+        if (params.search && params.search.trim()) {
+          const q = params.search.trim().toLowerCase();
+          const t = (localItem.title || '').toLowerCase();
+          const d = (localItem.description || '').toLowerCase();
+          if (!t.includes(q) && !d.includes(q)) return false;
+        }
+        return true;
+      });
+
       const combinedMap = new Map();
-      localItems.forEach((i) => combinedMap.set(i.id || i._id, { ...i, images: (i.images || []).map(normalizeImageUrl) }));
       normalizedApi.forEach((i) => combinedMap.set(i.id || i._id, i));
+      localItems.forEach((i) => {
+        const key = i.id || i._id;
+        if (key && !combinedMap.has(key)) {
+          combinedMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
+        }
+      });
       const allItems = Array.from(combinedMap.values());
 
       return {

@@ -943,18 +943,26 @@ exports.discoverItems = async (req, res) => {
     try {
       const whereConditions = [
         "(LOWER(i.status) = 'active' OR i.status IS NULL)",
-        "(LOWER(i.availability) = 'available' OR i.availability IS NULL)"
+        "(LOWER(i.availability) != 'removed' OR i.availability IS NULL)"
       ];
       const countParams = [];
+
+      if (req.query.availability && req.query.availability !== 'all') {
+        const avClean = req.query.availability.toLowerCase().trim();
+        countParams.push(`%${avClean}%`);
+        whereConditions.push(`LOWER(i.availability) ILIKE $${countParams.length}`);
+      }
 
       if (category && category !== 'all') {
         const catClean = category.toLowerCase().trim();
         if (catClean === 'clothing' || catClean === 'clothes') {
           whereConditions.push("(LOWER(i.category) ILIKE '%cloth%' OR LOWER(i.category) ILIKE '%apparel%')");
-        } else if (catClean === 'home' || catClean === 'furniture' || catClean === 'kitchen') {
-          whereConditions.push("(LOWER(i.category) ILIKE '%home%' OR LOWER(i.category) ILIKE '%furniture%' OR LOWER(i.category) ILIKE '%kitchen%')");
-        } else if (catClean === 'books' || catClean === 'study_materials' || catClean === 'study materials') {
-          whereConditions.push("(LOWER(i.category) ILIKE '%book%' OR LOWER(i.category) ILIKE '%study%' OR LOWER(i.category) ILIKE '%education%')");
+        } else if (catClean === 'home' || catClean === 'kitchen') {
+          whereConditions.push("(LOWER(i.category) ILIKE '%home%' OR LOWER(i.category) ILIKE '%kitchen%')");
+        } else if (catClean === 'furniture') {
+          whereConditions.push("(LOWER(i.category) ILIKE '%furn%')");
+        } else if (catClean === 'books' || catClean === 'education' || catClean === 'study_materials' || catClean === 'study materials') {
+          whereConditions.push("(LOWER(i.category) ILIKE '%book%' OR LOWER(i.category) ILIKE '%study%' OR LOWER(i.category) ILIKE '%educat%')");
         } else if (catClean === 'tools') {
           whereConditions.push("(LOWER(i.category) ILIKE '%tool%' OR LOWER(i.category) ILIKE '%diy%')");
         } else if (catClean === 'sports') {
@@ -962,7 +970,7 @@ exports.discoverItems = async (req, res) => {
         } else if (catClean === 'toys') {
           whereConditions.push("(LOWER(i.category) ILIKE '%toy%' OR LOWER(i.category) ILIKE '%game%')");
         } else if (catClean === 'electronics') {
-          whereConditions.push("(LOWER(i.category) ILIKE '%electronic%' OR LOWER(i.category) ILIKE '%gadget%')");
+          whereConditions.push("(LOWER(i.category) ILIKE '%elect%' OR LOWER(i.category) ILIKE '%gadget%' OR LOWER(i.category) ILIKE '%phone%')");
         } else {
           countParams.push(`%${catClean}%`);
           whereConditions.push(`LOWER(i.category) ILIKE $${countParams.length}`);
@@ -1005,18 +1013,26 @@ exports.discoverItems = async (req, res) => {
       // $1 = userLat, $2 = userLon
       const dataWhereConditions = [
         "(LOWER(i.status) = 'active' OR i.status IS NULL)",
-        "(LOWER(i.availability) = 'available' OR i.availability IS NULL)"
+        "(LOWER(i.availability) != 'removed' OR i.availability IS NULL)"
       ];
       const dataParams = [userLat, userLon];
+
+      if (req.query.availability && req.query.availability !== 'all') {
+        const avClean = req.query.availability.toLowerCase().trim();
+        dataParams.push(`%${avClean}%`);
+        dataWhereConditions.push(`LOWER(i.availability) ILIKE $${dataParams.length}`);
+      }
 
       if (category && category !== 'all') {
         const catClean = category.toLowerCase().trim();
         if (catClean === 'clothing' || catClean === 'clothes') {
           dataWhereConditions.push("(LOWER(i.category) ILIKE '%cloth%' OR LOWER(i.category) ILIKE '%apparel%')");
-        } else if (catClean === 'home' || catClean === 'furniture' || catClean === 'kitchen') {
-          dataWhereConditions.push("(LOWER(i.category) ILIKE '%home%' OR LOWER(i.category) ILIKE '%furniture%' OR LOWER(i.category) ILIKE '%kitchen%')");
-        } else if (catClean === 'books' || catClean === 'study_materials' || catClean === 'study materials') {
-          dataWhereConditions.push("(LOWER(i.category) ILIKE '%book%' OR LOWER(i.category) ILIKE '%study%' OR LOWER(i.category) ILIKE '%education%')");
+        } else if (catClean === 'home' || catClean === 'kitchen') {
+          dataWhereConditions.push("(LOWER(i.category) ILIKE '%home%' OR LOWER(i.category) ILIKE '%kitchen%')");
+        } else if (catClean === 'furniture') {
+          dataWhereConditions.push("(LOWER(i.category) ILIKE '%furn%')");
+        } else if (catClean === 'books' || catClean === 'education' || catClean === 'study_materials' || catClean === 'study materials') {
+          dataWhereConditions.push("(LOWER(i.category) ILIKE '%book%' OR LOWER(i.category) ILIKE '%study%' OR LOWER(i.category) ILIKE '%educat%')");
         } else if (catClean === 'tools') {
           dataWhereConditions.push("(LOWER(i.category) ILIKE '%tool%' OR LOWER(i.category) ILIKE '%diy%')");
         } else if (catClean === 'sports') {
@@ -1024,7 +1040,7 @@ exports.discoverItems = async (req, res) => {
         } else if (catClean === 'toys') {
           dataWhereConditions.push("(LOWER(i.category) ILIKE '%toy%' OR LOWER(i.category) ILIKE '%game%')");
         } else if (catClean === 'electronics') {
-          dataWhereConditions.push("(LOWER(i.category) ILIKE '%electronic%' OR LOWER(i.category) ILIKE '%gadget%')");
+          dataWhereConditions.push("(LOWER(i.category) ILIKE '%elect%' OR LOWER(i.category) ILIKE '%gadget%' OR LOWER(i.category) ILIKE '%phone%')");
         } else {
           dataParams.push(`%${catClean}%`);
           dataWhereConditions.push(`LOWER(i.category) ILIKE $${dataParams.length}`);
@@ -1059,10 +1075,12 @@ exports.discoverItems = async (req, res) => {
       }
 
       let orderSql = "ORDER BY i.created_at DESC";
-      if (sort === 'nearest' || hasValidCoords) {
-        orderSql = "ORDER BY distance_km ASC, i.created_at DESC";
+      if (sort === 'nearest') {
+        orderSql = "ORDER BY distance_km ASC NULLS LAST, i.created_at DESC";
       } else if (sort === 'updated') {
-        orderSql = "ORDER BY i.updated_at DESC";
+        orderSql = "ORDER BY i.updated_at DESC, i.created_at DESC";
+      } else {
+        orderSql = "ORDER BY i.created_at DESC";
       }
 
       dataParams.push(parsedLimit, skip);

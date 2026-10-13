@@ -134,9 +134,9 @@ export const CategoryShortcuts = () => {
                   <div style={{ fontSize: '0.825rem', fontWeight: 700, color: 'var(--color-slate-800)', lineHeight: 1.2 }}>
                     {cat.name}
                   </div>
-                  {counts[cat.id] > 0 && (
+                  {((counts[cat.id] > 0) || (cat.id === 'education' && counts.books > 0)) && (
                     <span style={{ fontSize: '0.7rem', color: 'var(--color-slate-400)', fontWeight: 500 }}>
-                      {counts[cat.id]} {counts[cat.id] === 1 ? 'item' : 'items'}
+                      {counts[cat.id] || counts.books} {(counts[cat.id] || counts.books) === 1 ? 'item' : 'items'}
                     </span>
                   )}
                 </div>
