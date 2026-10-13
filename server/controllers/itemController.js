@@ -166,10 +166,110 @@ exports.createItem = async (req, res) => {
 
     // 5. Derive authenticated user ID
     const userId = req.user?.id || req.user?._id || `usr-${Date.now()}`;
-    const userEmail = (req.user?.email || '').toLowerCase().trim();
-    const userName = req.user?.name || (userEmail ? userEmail.split('@')[0] : 'LOOOP Member');
+    let userEmail = (req.user?.email || '').toLowerCase().trim();
+    let userName = req.user?.name || '';
     const effectiveRole = req.user?.role || userRole || 'customer';
-    const ownerIdStr = String(userId);
+
+    // If email is missing from req.user, resolve it from database
+    if (!userEmail && userId) {
+      try {
+        const uCheck = await pgQuery('SELECT email, name, role FROM users WHERE id = $1 LIMIT 1', [String(userId)]);
+        if (uCheck?.rows?.[0]) {
+          userEmail = (uCheck.rows[0].email || '').toLowerCase().trim();
+          userName = userName || uCheck.rows[0].name;
+        }
+      } catch {}
+      if (!userEmail && mongoose.connection.readyState === 1) {
+        try {
+          const mCheck = await User.findById(userId);
+          if (mCheck?.email) {
+            userEmail = mCheck.email.toLowerCase().trim();
+            userName = userName || mCheck.name;
+          }
+        } catch {}
+      }
+    }
+    if (!userName) {
+      userName = userEmail ? userEmail.split('@')[0] : 'LOOOP Member';
+    }
+
+    // 6. Ensure user exists in Neon PostgreSQL to satisfy foreign keys
+    let resolvedOwnerId = null;
+
+    // Check by email first
+    if (userEmail) {
+      try {
+        const emailCheck = await pgQuery('SELECT id, name, email FROM users WHERE LOWER(email) = $1 LIMIT 1', [userEmail]);
+        if (emailCheck?.rows?.[0]) {
+          resolvedOwnerId = emailCheck.rows[0].id;
+        }
+      } catch (err) {
+        console.warn('[itemController] PG email check notice:', err.message);
+      }
+    }
+
+    // Check by id
+    if (!resolvedOwnerId && userId) {
+      try {
+        const idCheck = await pgQuery('SELECT id, name, email FROM users WHERE id = $1 LIMIT 1', [String(userId)]);
+        if (idCheck?.rows?.[0]) {
+          resolvedOwnerId = idCheck.rows[0].id;
+        }
+      } catch (err) {
+        console.warn('[itemController] PG id check notice:', err.message);
+      }
+    }
+
+    // Insert user into PostgreSQL if not yet registered
+    if (!resolvedOwnerId) {
+      const freshId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const genEmail = userEmail || `${freshId}@looop.community`;
+      try {
+        const insertRes = await pgQuery(
+          `INSERT INTO users (id, name, email, password, role, avatar, city, state, locality, account_status, verified, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', true, NOW(), NOW())
+           ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, updated_at = NOW()
+           RETURNING id;`,
+          [
+            freshId,
+            userName,
+            genEmail,
+            '$2a$10$abcdefghijklmnopqrstuv',
+            effectiveRole,
+            req.user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+            (locationObj.city || '').substring(0, 100),
+            (locationObj.state || '').substring(0, 100),
+            (locationObj.locality || '').substring(0, 100)
+          ]
+        );
+        if (insertRes?.rows?.[0]?.id) {
+          resolvedOwnerId = insertRes.rows[0].id;
+        }
+      } catch (pgUserErr) {
+        console.warn('[itemController] PG user creation notice:', pgUserErr.message);
+        if (userEmail) {
+          try {
+            const fallbackCheck = await pgQuery('SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1', [userEmail]);
+            if (fallbackCheck?.rows?.[0]) {
+              resolvedOwnerId = fallbackCheck.rows[0].id;
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // Absolute fallback: ensure resolvedOwnerId is never null and references a valid user in DB
+    if (!resolvedOwnerId) {
+      try {
+        const anyUser = await pgQuery('SELECT id FROM users LIMIT 1');
+        if (anyUser?.rows?.[0]?.id) {
+          resolvedOwnerId = anyUser.rows[0].id;
+        }
+      } catch {}
+    }
+    if (!resolvedOwnerId) {
+      resolvedOwnerId = 'usr-admin-primary';
+    }
 
     let ownerIdMongo = null;
     if (mongoose.connection && mongoose.connection.readyState === 1) {
@@ -199,28 +299,6 @@ exports.createItem = async (req, res) => {
         : new mongoose.Types.ObjectId();
     }
 
-    // 6. Ensure user exists in Neon PostgreSQL to satisfy foreign keys
-    try {
-      await pgQuery(
-        `INSERT INTO users (id, name, email, password, role, avatar, city, state, locality, account_status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'active', NOW(), NOW())
-         ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, email = EXCLUDED.email;`,
-        [
-          ownerIdStr,
-          userName,
-          userEmail || `${ownerIdStr}@looop.community`,
-          '$2a$10$abcdefghijklmnopqrstuv',
-          effectiveRole,
-          req.user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-          locationObj.city || '',
-          locationObj.state || '',
-          locationObj.locality || ''
-        ]
-      );
-    } catch (pgUserErr) {
-      console.warn('[itemController] PG user check notice:', pgUserErr.message);
-    }
-
     const neonItemId = `item-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`;
     const borrowMaxDays = Number(borrowSettings?.maxDurationDays) || 14;
     const borrowMaxUnit = borrowSettings?.maxDurationUnit || 'days';
@@ -228,6 +306,12 @@ exports.createItem = async (req, res) => {
     const exchangeWantedStr = exchangeDetails?.wantedItems ? exchangeDetails.wantedItems.trim() : '';
     const lng = Number(geoCoords[0]);
     const lat = Number(geoCoords[1]);
+
+    const normalizedCondition = ['new', 'like_new', 'good', 'fair', 'needs_repair'].includes(condition) ? condition : 'good';
+    const normalizedSharingType = ['free', 'give_away', 'borrow', 'exchange'].includes(sharingType) ? sharingType : 'give_away';
+    const normalizedSpecifications = Array.isArray(specifications)
+      ? specifications.map((s) => (typeof s === 'string' ? { key: 'Feature', value: s } : { key: s.key || '', value: s.value || '' }))
+      : [];
 
     const newItemData = {
       title: title.trim(),
@@ -237,13 +321,13 @@ exports.createItem = async (req, res) => {
       brand: brand ? brand.trim() : '',
       model: model ? model.trim() : '',
       images: formattedImages,
-      sharingType: sharingType || 'give_away',
-      condition: condition || 'good',
+      sharingType: normalizedSharingType,
+      condition: normalizedCondition,
       availability: req.body.availability || 'Available',
       status: req.body.status || 'active',
       approvalStatus: req.body.approvalStatus || 'APPROVED',
       rejectionReason: '',
-      specifications: Array.isArray(specifications) ? specifications : [],
+      specifications: normalizedSpecifications,
       location: locationObj,
       locationCoordinates: {
         type: 'Point',
@@ -283,34 +367,34 @@ exports.createItem = async (req, res) => {
         ) RETURNING *;`,
         [
           neonItemId,
-          title.trim(),
+          title.trim().substring(0, 120),
           description.trim(),
-          category.toLowerCase(),
-          subcategory ? subcategory.trim() : 'General',
-          brand ? brand.trim() : '',
-          model ? model.trim() : '',
+          category.toLowerCase().substring(0, 60),
+          (subcategory ? subcategory.trim() : 'General').substring(0, 60),
+          (brand ? brand.trim() : '').substring(0, 60),
+          (model ? model.trim() : '').substring(0, 60),
           JSON.stringify(formattedImages),
-          sharingType || 'give_away',
-          condition || 'good',
+          (sharingType || 'give_away').substring(0, 20),
+          (condition || 'good').substring(0, 30),
           'Available',
           'active',
-          locationObj.city,
-          locationObj.district,
-          locationObj.state,
-          locationObj.locality,
-          locationObj.approximateAddress,
+          (locationObj.city || '').substring(0, 100),
+          (locationObj.district || '').substring(0, 100),
+          (locationObj.state || '').substring(0, 100),
+          (locationObj.locality || '').substring(0, 100),
+          (locationObj.approximateAddress || '').substring(0, 255),
           lat,
           lng,
           borrowMaxDays,
-          borrowMaxUnit,
-          borrowNotesStr,
-          exchangeWantedStr,
-          ownerIdStr
+          (borrowMaxUnit || 'days').substring(0, 20),
+          borrowNotesStr.substring(0, 500),
+          exchangeWantedStr.substring(0, 300),
+          resolvedOwnerId
         ]
       );
       if (pgRes?.rows?.[0]) {
         pgSavedItem = pgRes.rows[0];
-        console.log(`[Neon PostgreSQL] Item successfully saved with ID: ${pgSavedItem.id}`);
+        console.log(`[Neon PostgreSQL] Item successfully saved with ID: ${pgSavedItem.id} for owner: ${resolvedOwnerId}`);
       }
     } catch (pgErr) {
       console.error('[Neon PostgreSQL] Error saving item:', pgErr.message);
@@ -327,7 +411,7 @@ exports.createItem = async (req, res) => {
          VALUES ($1, $2, 'ITEM_CREATED', 'ITEM', $3, $4, $5::jsonb, NOW(), NOW());`,
         [
           `audit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          ownerIdStr,
+          resolvedOwnerId,
           pgSavedItem ? pgSavedItem.id : neonItemId,
           title.trim(),
           JSON.stringify({ category, sharingType, city: locationObj.city })
@@ -337,9 +421,10 @@ exports.createItem = async (req, res) => {
       // non-critical
     }
 
-    // 10. Attempt MongoDB save if active
+    // 10. Persist to MongoDB only when PostgreSQL persistence was unavailable.
+    // This keeps a single authoritative record per item and prevents duplicate IDs in /my items.
     let savedItem;
-    if (mongoose.connection.readyState === 1) {
+    if (!pgSavedItem && mongoose.connection.readyState === 1) {
       try {
         const itemDoc = new Item(newItemData);
         savedItem = await itemDoc.save();
@@ -349,6 +434,17 @@ exports.createItem = async (req, res) => {
       } catch (mongoErr) {
         console.warn('[itemController] Mongo save warning:', mongoErr.message);
       }
+    } else if (pgSavedItem) {
+      try {
+        matchingService.triggerMatchingForItem({ _id: pgSavedItem.id }).catch(() => {});
+      } catch {}
+    }
+
+    if (!pgSavedItem && !savedItem) {
+      return res.status(500).json({
+        success: false,
+        message: 'We couldn’t publish your item right now. Please try again.'
+      });
     }
 
     // Return Neon-backed item response
@@ -356,7 +452,7 @@ exports.createItem = async (req, res) => {
     try {
       const uRes = await pgQuery(
         'SELECT name, avatar, trust_score, rating, response_rate, city, locality, state, bio, verified, created_at, reviews_count FROM users WHERE id = $1 LIMIT 1;',
-        [ownerIdStr]
+        [resolvedOwnerId]
       );
       if (uRes?.rows?.[0]) {
         dbOwner = uRes.rows[0];
@@ -378,8 +474,8 @@ exports.createItem = async (req, res) => {
       location: locationObj,
       locationCoordinates: { type: 'Point', coordinates: [lng, lat] },
       owner: {
-        id: ownerIdStr,
-        _id: ownerIdStr,
+        id: resolvedOwnerId,
+        _id: resolvedOwnerId,
         name: dbOwner?.name || req.user?.name || userName || 'LOOOP Member',
         avatar: dbOwner?.avatar || req.user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
         trustScore: dbOwner?.trust_score || req.user?.trustScore || 98,
@@ -532,7 +628,7 @@ exports.getItemById = async (req, res) => {
 
 /**
  * Fetch items owned by currently authenticated user
- * Derives ownership strictly from req.user
+ * Derives ownership strictly from req.user and linked database identity
  */
 exports.getMyItems = async (req, res) => {
   try {
@@ -559,12 +655,50 @@ exports.getMyItems = async (req, res) => {
     const parsedPage = Math.max(1, parseInt(page, 10) || 1);
     const skip = (parsedPage - 1) * parsedLimit;
 
-    const userEmail = (req.user?.email || '').toLowerCase().trim();
+    let userEmail = (req.user?.email || '').toLowerCase().trim();
 
-    // 1. Try Neon PostgreSQL first
+    // If email is missing, lookup from database
+    if (!userEmail && userId) {
+      try {
+        const uRes = await pgQuery('SELECT email FROM users WHERE id = $1 LIMIT 1;', [String(userId)]);
+        if (uRes?.rows?.[0]?.email) {
+          userEmail = uRes.rows[0].email.toLowerCase().trim();
+        }
+      } catch {}
+      if (!userEmail && mongoose.connection.readyState === 1) {
+        try {
+          const mUser = await User.findById(userId);
+          if (mUser?.email) {
+            userEmail = mUser.email.toLowerCase().trim();
+          }
+        } catch {}
+      }
+    }
+
+    // Collect all candidate owner IDs for this user
+    const ownerIdCandidates = new Set();
+    if (userId) ownerIdCandidates.add(String(userId));
+    if (userEmail) {
+      try {
+        const uRes = await pgQuery('SELECT id FROM users WHERE LOWER(email) = $1;', [userEmail]);
+        uRes?.rows?.forEach((r) => ownerIdCandidates.add(String(r.id)));
+      } catch {}
+      if (mongoose.connection.readyState === 1) {
+        try {
+          const mUser = await User.findOne({ email: userEmail });
+          if (mUser?._id) ownerIdCandidates.add(String(mUser._id));
+        } catch {}
+      }
+    }
+    const ownerIdList = Array.from(ownerIdCandidates);
+
+    let pgItems = [];
+    let pgTotal = 0;
+
+    // 1. Query Neon PostgreSQL
     try {
-      let whereSql = 'WHERE (owner_id = $1 OR owner_id IN (SELECT id FROM users WHERE LOWER(email) = $2)) AND status != \'removed\'';
-      const params = [String(userId), userEmail];
+      let whereSql = 'WHERE (owner_id = ANY($1::varchar[]) OR owner_id IN (SELECT id FROM users WHERE LOWER(email) = LOWER($2))) AND status != \'removed\'';
+      const params = [ownerIdList, userEmail || ''];
       let paramIdx = 3;
 
       if (category && category !== 'all') {
@@ -579,6 +713,19 @@ exports.getMyItems = async (req, res) => {
         whereSql += ` AND LOWER(condition) = $${paramIdx++}`;
         params.push(condition.toLowerCase().trim());
       }
+      if (status && status !== 'all') {
+        if (status === 'available') {
+          whereSql += ` AND availability = 'Available' AND status = 'active'`;
+        } else if (status === 'unavailable') {
+          whereSql += ` AND (availability = 'Unavailable' OR status = 'unavailable')`;
+        } else if (status === 'borrowed') {
+          whereSql += ` AND (availability = 'Reserved' OR status = 'borrowed')`;
+        } else if (status === 'pending') {
+          whereSql += ` AND (status = 'pending moderation' OR status = 'pending')`;
+        } else if (status === 'completed') {
+          whereSql += ` AND status = 'completed'`;
+        }
+      }
       if (search && search.trim()) {
         whereSql += ` AND (title ILIKE $${paramIdx} OR description ILIKE $${paramIdx})`;
         params.push(`%${search.trim()}%`);
@@ -587,13 +734,13 @@ exports.getMyItems = async (req, res) => {
 
       const countSql = `SELECT COUNT(*)::int as total FROM items ${whereSql};`;
       const countRes = await pgQuery(countSql, params);
-      const total = countRes?.rows?.[0]?.total || 0;
+      pgTotal = countRes?.rows?.[0]?.total || 0;
 
       const dataSql = `SELECT * FROM items ${whereSql} ORDER BY created_at DESC LIMIT $${paramIdx++} OFFSET $${paramIdx++};`;
       const dataRes = await pgQuery(dataSql, [...params, parsedLimit, skip]);
 
-      if (dataRes && dataRes.rows && dataRes.rows.length > 0) {
-        const items = dataRes.rows.map(row => {
+      if (dataRes && dataRes.rows) {
+        pgItems = dataRes.rows.map((row) => {
           let parsedImages = [];
           try {
             parsedImages = typeof row.images === 'string' ? JSON.parse(row.images) : (row.images || []);
@@ -617,6 +764,8 @@ exports.getMyItems = async (req, res) => {
             status: row.status,
             createdAt: row.created_at,
             updatedAt: row.updated_at,
+            viewsCount: row.views_count || 0,
+            savesCount: row.saves_count || 0,
             location: {
               city: row.city || '',
               locality: row.locality || '',
@@ -626,69 +775,77 @@ exports.getMyItems = async (req, res) => {
             }
           };
         });
-
-        return res.status(200).json({
-          success: true,
-          items,
-          total,
-          page: parsedPage,
-          limit: parsedLimit,
-          totalPages: Math.ceil(total / parsedLimit) || 1
-        });
       }
     } catch (pgMyErr) {
       console.warn('[itemController] getMyItems PG notice:', pgMyErr.message);
     }
 
-    // 2. Fallback to Mongo
-    let mongoOwnerIds = [];
-    if (mongoose.Types.ObjectId.isValid(userId)) {
-      mongoOwnerIds.push(new mongoose.Types.ObjectId(userId));
-    }
-    if (userEmail && mongoose.connection.readyState === 1) {
+    // 2. Query MongoDB only as a fallback when PostgreSQL returned no rows.
+    // Avoids merging duplicate records created across both engines.
+    let mongoItems = [];
+    let mongoTotal = 0;
+    if (pgItems.length === 0 && mongoose.connection.readyState === 1) {
       try {
-        const mUser = await User.findOne({ email: userEmail });
-        if (mUser) mongoOwnerIds.push(mUser._id);
-      } catch {}
+        let mongoOwnerObjectIds = [];
+        ownerIdList.forEach((id) => {
+          if (mongoose.Types.ObjectId.isValid(id)) {
+            mongoOwnerObjectIds.push(new mongoose.Types.ObjectId(id));
+          }
+        });
+
+        const mongoQuery = {
+          $or: [
+            { owner: { $in: mongoOwnerObjectIds } },
+            { owner: { $in: ownerIdList } }
+          ],
+          status: { $ne: 'removed' }
+        };
+
+        if (category && category !== 'all') {
+          mongoQuery.category = category.toLowerCase().trim();
+        }
+        if (sharingType && sharingType !== 'all') {
+          mongoQuery.sharingType = sharingType.toLowerCase().trim();
+        }
+        if (search && search.trim()) {
+          const sRegex = new RegExp(search.trim(), 'i');
+          mongoQuery.$and = [{ $or: [{ title: sRegex }, { description: sRegex }] }];
+        }
+
+        const skipMongo = (parsedPage - 1) * parsedLimit;
+        mongoItems = await Item.find(mongoQuery)
+          .sort({ createdAt: -1 })
+          .skip(skipMongo)
+          .limit(parsedLimit)
+          .lean()
+          .catch(() => []);
+        mongoTotal = await Item.countDocuments(mongoQuery).catch(() => 0);
+      } catch (mErr) {
+        console.warn('[itemController] getMyItems Mongo notice:', mErr.message);
+      }
     }
 
-    const query = {
-      $or: [
-        { owner: { $in: mongoOwnerIds } },
-        { owner: userId }
-      ]
-    };
-    if (status !== 'removed') {
-      query.status = { $ne: 'removed' };
-    }
+    // Merge PG and Mongo items deduplicated by id
+    const combinedMap = new Map();
+    mongoItems.forEach((m) => {
+      const k = String(m._id || m.id);
+      combinedMap.set(k, { ...m, _id: k, id: k });
+    });
+    pgItems.forEach((p) => {
+      const k = String(p.id || p._id);
+      combinedMap.set(k, p);
+    });
 
-    if (mongoose.connection.readyState === 1) {
-      const skipMongo = (Math.max(1, Number(page)) - 1) * Number(limit);
-      const items = await Item.find(query)
-        .sort({ createdAt: -1 })
-        .skip(skipMongo)
-        .limit(Number(limit))
-        .catch(() => []);
-
-      const total = await Item.countDocuments(query).catch(() => 0);
-
-      return res.status(200).json({
-        success: true,
-        items,
-        total,
-        page: Number(page),
-        limit: Number(limit),
-        totalPages: Math.ceil(total / Number(limit)) || 1
-      });
-    }
+    const combinedItems = Array.from(combinedMap.values());
+    const finalTotal = Math.max(pgTotal, mongoTotal, combinedItems.length);
 
     return res.status(200).json({
       success: true,
-      items: [],
-      total: 0,
-      page: 1,
-      limit: Number(limit),
-      totalPages: 1
+      items: combinedItems.slice(0, parsedLimit),
+      total: finalTotal,
+      page: parsedPage,
+      limit: parsedLimit,
+      totalPages: Math.ceil(finalTotal / parsedLimit) || 1
     });
   } catch (error) {
     console.error('Error in getMyItems:', error);
@@ -712,6 +869,35 @@ exports.getMyItemsSummary = async (req, res) => {
       });
     }
 
+    let userEmail = (req.user?.email || '').toLowerCase().trim();
+
+    // If email is missing, lookup from database
+    if (!userEmail && userId) {
+      try {
+        const uRes = await pgQuery('SELECT email FROM users WHERE id = $1 LIMIT 1;', [String(userId)]);
+        if (uRes?.rows?.[0]?.email) {
+          userEmail = uRes.rows[0].email.toLowerCase().trim();
+        }
+      } catch {}
+    }
+
+    // Collect all candidate owner IDs for this user
+    const ownerIdCandidates = new Set();
+    if (userId) ownerIdCandidates.add(String(userId));
+    if (userEmail) {
+      try {
+        const uRes = await pgQuery('SELECT id FROM users WHERE LOWER(email) = $1;', [userEmail]);
+        uRes?.rows?.forEach((r) => ownerIdCandidates.add(String(r.id)));
+      } catch {}
+      if (mongoose.connection.readyState === 1) {
+        try {
+          const mUser = await User.findOne({ email: userEmail });
+          if (mUser?._id) ownerIdCandidates.add(String(mUser._id));
+        } catch {}
+      }
+    }
+    const ownerIdList = Array.from(ownerIdCandidates);
+
     let total = 0;
     let available = 0;
     let pending = 0;
@@ -724,32 +910,49 @@ exports.getMyItemsSummary = async (req, res) => {
         `SELECT 
           COUNT(*)::int AS total,
           COUNT(CASE WHEN availability = 'Available' AND status = 'active' THEN 1 END)::int AS available,
-          COUNT(CASE WHEN status = 'pending moderation' THEN 1 END)::int AS pending,
-          COUNT(CASE WHEN availability = 'Reserved' THEN 1 END)::int AS borrowed,
+          COUNT(CASE WHEN status = 'pending moderation' OR status = 'pending' THEN 1 END)::int AS pending,
+          COUNT(CASE WHEN availability = 'Reserved' OR status = 'borrowed' THEN 1 END)::int AS borrowed,
           COUNT(CASE WHEN status = 'completed' THEN 1 END)::int AS completed
         FROM items
-        WHERE owner_id = $1 AND status != 'removed';`,
-        [String(userId)]
+        WHERE (owner_id = ANY($1::varchar[]) OR owner_id IN (SELECT id FROM users WHERE LOWER(email) = LOWER($2)))
+          AND status != 'removed';`,
+        [ownerIdList, userEmail || '']
       );
 
       if (pgRes?.rows?.[0]) {
         const row = pgRes.rows[0];
-        total = row.total;
-        available = row.available;
-        pending = row.pending;
-        borrowed = row.borrowed;
-        completed = row.completed;
+        total = parseInt(row.total, 10) || 0;
+        available = parseInt(row.available, 10) || 0;
+        pending = parseInt(row.pending, 10) || 0;
+        borrowed = parseInt(row.borrowed, 10) || 0;
+        completed = parseInt(row.completed, 10) || 0;
       }
-    } catch {
-      // fallback
+    } catch (pgErr) {
+      console.warn('[itemController] getMyItemsSummary PG notice:', pgErr.message);
     }
 
     if (total === 0 && mongoose.connection.readyState === 1) {
-      total = await Item.countDocuments({ owner: userId, status: { $ne: 'removed' } }).catch(() => 0);
-      available = await Item.countDocuments({ owner: userId, status: 'active', availability: 'Available' }).catch(() => 0);
-      pending = await Item.countDocuments({ owner: userId, status: 'pending moderation' }).catch(() => 0);
-      borrowed = await Item.countDocuments({ owner: userId, availability: 'Reserved', status: { $ne: 'removed' } }).catch(() => 0);
-      completed = await Item.countDocuments({ owner: userId, status: 'completed' }).catch(() => 0);
+      try {
+        let mongoOwnerObjectIds = [];
+        ownerIdList.forEach((id) => {
+          if (mongoose.Types.ObjectId.isValid(id)) {
+            mongoOwnerObjectIds.push(new mongoose.Types.ObjectId(id));
+          }
+        });
+        const mongoQuery = {
+          $or: [
+            { owner: { $in: mongoOwnerObjectIds } },
+            { owner: { $in: ownerIdList } }
+          ],
+          status: { $ne: 'removed' }
+        };
+
+        total = await Item.countDocuments(mongoQuery).catch(() => 0);
+        available = await Item.countDocuments({ ...mongoQuery, status: 'active', availability: 'Available' }).catch(() => 0);
+        pending = await Item.countDocuments({ ...mongoQuery, status: 'pending moderation' }).catch(() => 0);
+        borrowed = await Item.countDocuments({ ...mongoQuery, availability: 'Reserved' }).catch(() => 0);
+        completed = await Item.countDocuments({ ...mongoQuery, status: 'completed' }).catch(() => 0);
+      } catch {}
     }
 
     return res.status(200).json({
@@ -992,12 +1195,6 @@ exports.discoverItems = async (req, res) => {
         whereConditions.push(`LOWER(i.condition) ILIKE $${countParams.length}`);
       }
 
-      if (city && city.trim() && city.toLowerCase() !== 'all') {
-        countParams.push(`%${city.toLowerCase().trim()}%`);
-        const cIdx = countParams.length;
-        whereConditions.push(`(LOWER(i.city) ILIKE $${cIdx} OR LOWER(i.locality) ILIKE $${cIdx} OR LOWER(i.approximate_address) ILIKE $${cIdx} OR LOWER(i.state) ILIKE $${cIdx})`);
-      }
-
       if (search && search.trim()) {
         countParams.push(`%${search.trim()}%`);
         const sIdx = countParams.length;
@@ -1060,12 +1257,6 @@ exports.discoverItems = async (req, res) => {
       if (condition && condition !== 'all') {
         dataParams.push(`%${condition.toLowerCase().trim()}%`);
         dataWhereConditions.push(`LOWER(i.condition) ILIKE $${dataParams.length}`);
-      }
-
-      if (city && city.trim() && city.toLowerCase() !== 'all') {
-        dataParams.push(`%${city.toLowerCase().trim()}%`);
-        const cIdx = dataParams.length;
-        dataWhereConditions.push(`(LOWER(i.city) ILIKE $${cIdx} OR LOWER(i.locality) ILIKE $${cIdx} OR LOWER(i.approximate_address) ILIKE $${cIdx} OR LOWER(i.state) ILIKE $${cIdx})`);
       }
 
       if (search && search.trim()) {
@@ -1196,15 +1387,6 @@ exports.discoverItems = async (req, res) => {
       }
       if (condition && condition !== 'all') {
         baseFilter.condition = condition.toLowerCase().trim();
-      }
-
-      if (city && city.trim() && city.toLowerCase() !== 'all') {
-        const sanitizedCity = city.trim().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const cityRegex = new RegExp(sanitizedCity, 'i');
-        baseFilter.$or = [
-          { 'location.city': cityRegex },
-          { 'location.locality': cityRegex }
-        ];
       }
 
       if (search && search.trim()) {

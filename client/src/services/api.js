@@ -58,6 +58,24 @@ apiClient.interceptors.request.use(
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       }
+      const userRaw = localStorage.getItem('looop_user');
+      if (userRaw) {
+        try {
+          const userObj = JSON.parse(userRaw);
+          if (userObj.id || userObj._id) {
+            config.headers['X-User-Id'] = userObj.id || userObj._id;
+          }
+          if (userObj.email) {
+            config.headers['X-User-Email'] = userObj.email;
+          }
+          if (userObj.name) {
+            config.headers['X-User-Name'] = userObj.name;
+          }
+          if (userObj.role) {
+            config.headers['X-User-Role'] = userObj.role;
+          }
+        } catch {}
+      }
     }
     return config;
   },

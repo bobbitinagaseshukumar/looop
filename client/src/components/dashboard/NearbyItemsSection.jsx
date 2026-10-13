@@ -20,7 +20,7 @@ export const NearbyItemsSection = ({ items, loading, error, onRetry }) => {
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--color-slate-900)', margin: 0 }}>
-              Items Near You
+              Community Items
             </h2>
             <span
               style={{
@@ -36,11 +36,11 @@ export const NearbyItemsSection = ({ items, loading, error, onRetry }) => {
               }}
             >
               <MapPin size={11} />
-              <span>Within 5 km</span>
+              <span>All Locations</span>
             </span>
           </div>
           <p style={{ fontSize: '0.85rem', color: 'var(--color-slate-500)', margin: '4px 0 0 0' }}>
-            Available for giveaway, borrow, or exchange from verified neighbors
+            Available for giveaway, borrow, or exchange from community members
           </p>
         </div>
 

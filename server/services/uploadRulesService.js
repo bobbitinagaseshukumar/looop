@@ -24,21 +24,40 @@ const DEFAULT_UPLOAD_RULES = {
 
 exports.DEFAULT_UPLOAD_RULES = DEFAULT_UPLOAD_RULES;
 
+const mongoose = require('mongoose');
+const { query: pgQuery } = require('../config/postgres');
+
 /**
  * Get product upload rules dynamically from DB or default
  */
 exports.getUploadRules = async () => {
+  // 1. Check PostgreSQL first
   try {
-    const settingDoc = await AdminSetting.findOne({ key: 'product_upload_rules' }).lean();
-    if (settingDoc && settingDoc.value) {
+    const pgRes = await pgQuery("SELECT value FROM admin_settings WHERE key = 'product_upload_rules' LIMIT 1;");
+    if (pgRes?.rows?.[0]?.value) {
+      const val = typeof pgRes.rows[0].value === 'string' ? JSON.parse(pgRes.rows[0].value) : pgRes.rows[0].value;
       return {
         ...DEFAULT_UPLOAD_RULES,
-        ...settingDoc.value
+        ...val
       };
     }
-  } catch (err) {
-    console.error('[UploadRulesService] Error fetching upload rules:', err.message);
+  } catch {}
+
+  // 2. Check MongoDB only if connected (prevent 10s command buffering timeout)
+  if (mongoose.connection && mongoose.connection.readyState === 1) {
+    try {
+      const settingDoc = await AdminSetting.findOne({ key: 'product_upload_rules' }).lean();
+      if (settingDoc && settingDoc.value) {
+        return {
+          ...DEFAULT_UPLOAD_RULES,
+          ...settingDoc.value
+        };
+      }
+    } catch (err) {
+      console.error('[UploadRulesService] Error fetching upload rules:', err.message);
+    }
   }
+
   return { ...DEFAULT_UPLOAD_RULES };
 };
 

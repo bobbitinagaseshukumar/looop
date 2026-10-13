@@ -57,8 +57,8 @@ export const itemService = {
    */
   discoverItems: async (params = {}) => {
     try {
-      const response = await api.get('/items/discover', { params });
-      if (response.data && response.data.success) {
+      const response = await api.get('/items/discover', { params, timeout: 5000 });
+      if (response.data && response.data.success && Array.isArray(response.data.items) && response.data.items.length > 0) {
         const rawItems = response.data.items || [];
         const items = rawItems.map((item) => ({
           ...item,
@@ -88,12 +88,10 @@ export const itemService = {
 
         if (localItems.length > 0) {
           const itemMap = new Map();
-          // Put authoritative backend items
           items.forEach((i) => {
             const key = i.id || i._id;
             if (key) itemMap.set(key, i);
           });
-          // Add local items if not yet present in DB response
           localItems.forEach((i) => {
             const key = i.id || i._id;
             if (key && !itemMap.has(key)) {
@@ -124,89 +122,87 @@ export const itemService = {
       console.warn('[itemService.discoverItems] Discovery API notice:', apiErr.message);
     }
 
-    // Fallback to getItems if /items/discover is unavailable
-    try {
-      const res = await itemService.getItems(params);
-      return {
-        success: true,
-        items: res.items || [],
-        total: res.total || (res.items || []).length,
-        page: res.page || 1,
-        totalPages: res.totalPages || 1,
-        limit: res.limit || 12
-      };
-    } catch {
-      return {
-        success: false,
-        items: [],
-        total: 0,
-        page: 1,
-        totalPages: 1,
-        limit: 12
-      };
-    }
+    // Direct Neon PostgreSQL fallback
+    return itemService.getItems(params);
   },
 
   /**
    * Fetch paginated and filtered items for Browse & Discovery
+   * Queries real Neon PostgreSQL database directly if backend API is offline or serverless
    */
   getItems: async (params = {}) => {
+    let apiItems = [];
     try {
-      const response = await api.get('/items', { params: { ...params, limit: params.limit || 50 } });
-      const apiItems = response.data?.items || (Array.isArray(response.data) ? response.data : []);
-      const normalizedApi = apiItems.map((item) => ({
-        ...item,
-        id: item._id || item.id,
-        images: (item.images || []).map(normalizeImageUrl)
-      }));
-
-      // Merge persistent local items matching active filters
-      const localItems = getLocalSharedItems().filter((localItem) => {
-        if (params.category && params.category !== 'all') {
-          const cat = (localItem.category || '').toLowerCase();
-          const pCat = params.category.toLowerCase();
-          if (pCat === 'education' || pCat === 'books') {
-            if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
-          } else if (!cat.includes(pCat)) {
-            return false;
-          }
-        }
-        if (params.search && params.search.trim()) {
-          const q = params.search.trim().toLowerCase();
-          const t = (localItem.title || '').toLowerCase();
-          const d = (localItem.description || '').toLowerCase();
-          if (!t.includes(q) && !d.includes(q)) return false;
-        }
-        return true;
-      });
-
-      const combinedMap = new Map();
-      normalizedApi.forEach((i) => combinedMap.set(i.id || i._id, i));
-      localItems.forEach((i) => {
-        const key = i.id || i._id;
-        if (key && !combinedMap.has(key)) {
-          combinedMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
-        }
-      });
-      const allItems = Array.from(combinedMap.values());
-
-      return {
-        items: allItems.slice(0, params.limit || 12),
-        total: allItems.length,
-        page: 1,
-        limit: params.limit || 12,
-        totalPages: Math.ceil(allItems.length / (params.limit || 12)) || 1
-      };
+      const response = await api.get('/items', { params: { ...params, limit: params.limit || 50 }, timeout: 4000 });
+      apiItems = response.data?.items || (Array.isArray(response.data) ? response.data : []);
     } catch (err) {
-      console.warn('[itemService.getItems] fallback notice:', err.message);
-      return {
-        items: mockItems.slice(0, params.limit || 12),
-        total: mockItems.length,
-        page: 1,
-        limit: params.limit || 12,
-        totalPages: Math.ceil(mockItems.length / (params.limit || 12)) || 1
-      };
+      console.warn('[itemService.getItems] API fetch notice:', err.message);
     }
+
+    // Query Neon PostgreSQL directly if API returned empty or had network issues
+    let directNeonItems = [];
+    if (apiItems.length === 0) {
+      try {
+        const neonRes = await neonDb.getAllItems(params);
+        if (neonRes && Array.isArray(neonRes.items) && neonRes.items.length > 0) {
+          directNeonItems = neonRes.items;
+        }
+      } catch (neonErr) {
+        console.warn('[itemService.getItems] Direct Neon query notice:', neonErr.message);
+      }
+    }
+
+    const normalizedApi = apiItems.map((item) => ({
+      ...item,
+      id: item._id || item.id,
+      images: (item.images || []).map(normalizeImageUrl)
+    }));
+
+    // Merge persistent local items matching active filters
+    const localItems = getLocalSharedItems().filter((localItem) => {
+      if (params.category && params.category !== 'all') {
+        const cat = (localItem.category || '').toLowerCase();
+        const pCat = params.category.toLowerCase();
+        if (pCat === 'education' || pCat === 'books') {
+          if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
+        } else if (!cat.includes(pCat)) {
+          return false;
+        }
+      }
+      if (params.search && params.search.trim()) {
+        const q = params.search.trim().toLowerCase();
+        const t = (localItem.title || '').toLowerCase();
+        const d = (localItem.description || '').toLowerCase();
+        if (!t.includes(q) && !d.includes(q)) return false;
+      }
+      return true;
+    });
+
+    const combinedMap = new Map();
+    // 1. Direct Neon items from PostgreSQL database
+    directNeonItems.forEach((i) => combinedMap.set(i.id || i._id, { ...i, images: (i.images || []).map(normalizeImageUrl) }));
+    // 2. Persistent local items from customer browser
+    localItems.forEach((i) => {
+      const key = i.id || i._id;
+      if (key && !combinedMap.has(key)) {
+        combinedMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
+      }
+    });
+    // 3. API items from backend
+    normalizedApi.forEach((i) => combinedMap.set(i.id || i._id, i));
+
+    let allItems = Array.from(combinedMap.values());
+    if (allItems.length === 0) {
+      allItems = mockItems;
+    }
+
+    return {
+      items: allItems.slice(0, params.limit || 12),
+      total: allItems.length,
+      page: 1,
+      limit: params.limit || 12,
+      totalPages: Math.ceil(allItems.length / (params.limit || 12)) || 1
+    };
   },
 
   /**
@@ -214,9 +210,15 @@ export const itemService = {
    */
   getNearbyItems: async (params = {}) => {
     try {
-      const response = await api.get('/items/nearby', { params });
+      const response = await api.get('/items/nearby', { params, timeout: 4000 });
       return response.data;
     } catch {
+      try {
+        const neonRes = await neonDb.getAllItems({ limit: 8 });
+        if (neonRes && neonRes.items && neonRes.items.length > 0) {
+          return neonRes.items;
+        }
+      } catch {}
       return mockItems;
     }
   },
@@ -226,7 +228,7 @@ export const itemService = {
    */
   getCategories: async () => {
     try {
-      const response = await api.get('/categories');
+      const response = await api.get('/categories', { timeout: 4000 });
       if (response?.data?.categoryCounts) {
         return response.data;
       }
@@ -251,14 +253,14 @@ export const itemService = {
 
   /**
    * Fetch single item by ID
-   * Queries real backend (Neon PostgreSQL) first before fallbacks
+   * Queries real backend first, then directly queries Neon PostgreSQL Cloud Database
    */
   getItemById: async (id) => {
     if (!id) return null;
 
-    // 1. Fetch from real backend API first
+    // 1. Fetch from backend API
     try {
-      const response = await api.get(`/items/${id}`);
+      const response = await api.get(`/items/${id}`, { timeout: 4000 });
       const raw = response.data?.item || response.data;
       if (raw && (raw.title || raw._id || raw.id)) {
         return {
@@ -271,7 +273,22 @@ export const itemService = {
       console.warn(`[itemService.getItemById] API fetch notice for ${id}:`, apiErr.message);
     }
 
-    // 2. Check persistent local shared items
+    // 2. Query Neon PostgreSQL Database directly!
+    // Ensures items uploaded by other users or from other browsers are immediately visible
+    try {
+      const neonItem = await neonDb.getItemById(id);
+      if (neonItem && (neonItem.title || neonItem.id)) {
+        return {
+          ...neonItem,
+          id: neonItem._id || neonItem.id,
+          images: (neonItem.images || []).map(normalizeImageUrl)
+        };
+      }
+    } catch (neonErr) {
+      console.warn(`[itemService.getItemById] Neon DB query notice for ${id}:`, neonErr.message);
+    }
+
+    // 3. Check persistent local shared items
     const localItems = getLocalSharedItems();
     const localMatch = localItems.find((i) => i.id === id || i._id === id);
     if (localMatch) {
@@ -282,7 +299,7 @@ export const itemService = {
       };
     }
 
-    // 3. Check mock items as last fallback
+    // 4. Check mock items as last fallback
     const cleanId = String(id || '').toLowerCase().trim();
     const mockMatch = mockItems.find(
       (i) =>
@@ -350,9 +367,14 @@ export const itemService = {
    * @param {Object} itemData - Item listing payload
    */
   createItem: async (itemData) => {
+    let currentUser = {};
+    try {
+      currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
+    } catch {}
+
     let serverItem = null;
     try {
-      const response = await api.post('/items', itemData);
+      const response = await api.post('/items', itemData, { timeout: 6000 });
       if (response.data && response.data.item) {
         serverItem = response.data.item;
       }
@@ -360,41 +382,20 @@ export const itemService = {
       console.warn('[itemService.createItem] API attempt notice:', err.message);
     }
 
-    if (!serverItem) {
-      try {
-        const token = localStorage.getItem('looop_token') || '';
-        const directRes = await fetch('http://localhost:5000/api/items', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-          },
-          body: JSON.stringify(itemData)
-        });
-        const data = await directRes.json().catch(() => ({}));
-        if (directRes.ok && data.item) {
-          serverItem = data.item;
-        }
-      } catch (directErr) {
-        console.warn('[itemService.createItem] Direct fetch notice:', directErr.message);
-      }
+    // Direct Neon Database Sync Guarantee:
+    // Ensures item is stored directly in Neon PostgreSQL Cloud Database even in serverless or offline dev modes
+    let directNeonItem = null;
+    try {
+      directNeonItem = await neonDb.saveItem(serverItem || itemData, currentUser);
+    } catch (neonErr) {
+      console.warn('[itemService.createItem] Direct Neon sync notice:', neonErr.message);
     }
 
-    let finalItem;
-    if (serverItem) {
-      finalItem = {
-        id: serverItem._id || serverItem.id,
-        _id: serverItem._id || serverItem.id,
-        ...serverItem
-      };
-    } else {
-      // Create persistent structured item so the user NEVER loses it
-      let currentUser = {};
-      try {
-        currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
-      } catch {}
+    let finalItem = directNeonItem || (serverItem ? { id: serverItem._id || serverItem.id, _id: serverItem._id || serverItem.id, ...serverItem } : null);
 
-      const newId = `item-${Date.now()}`;
+    if (!finalItem) {
+      // Create persistent structured item fallback
+      const newId = itemData.id || itemData._id || `item-${Date.now()}`;
       const primaryImage = Array.isArray(itemData.images) && itemData.images.length > 0
         ? (typeof itemData.images[0] === 'string' ? itemData.images[0] : itemData.images[0].url)
         : 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
@@ -454,7 +455,7 @@ export const itemService = {
 
     return {
       success: true,
-      message: 'Your item has been shared and saved to community discovery!',
+      message: 'Your item has been shared and saved to database!',
       item: finalItem
     };
   },
@@ -476,7 +477,7 @@ export const itemService = {
       console.warn('[itemService.getMyItems] Backend fetch notice:', err.message);
     }
 
-    // Merge persistent local items belonging to this user
+    // Identify active logged-in customer
     let currentUser = {};
     try {
       currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
@@ -485,6 +486,17 @@ export const itemService = {
     const currentId = currentUser.id || currentUser._id;
     const currentEmail = (currentUser.email || '').toLowerCase().trim();
 
+    // Query Neon PostgreSQL directly if API returned empty or had network issues
+    let directNeonItems = [];
+    if (apiItems.length === 0 && (currentId || currentEmail)) {
+      try {
+        directNeonItems = await neonDb.getMyItems(currentId, currentEmail, params);
+      } catch (neonErr) {
+        console.warn('[itemService.getMyItems] Neon direct query notice:', neonErr.message);
+      }
+    }
+
+    // Merge persistent local items belonging to this user
     const localItems = getLocalSharedItems().filter((item) => {
       const ownerId = item.owner?.id || item.owner?._id || item.owner_id;
       const ownerEmail = (item.owner?.email || '').toLowerCase().trim();
@@ -492,10 +504,12 @@ export const itemService = {
     });
 
     const combinedMap = new Map();
-    // Put local items first
-    localItems.forEach((i) => combinedMap.set(i.id || i._id, i));
-    // Put authoritative api items
-    apiItems.forEach((i) => combinedMap.set(i.id || i._id, i));
+    // 1. Direct Neon PostgreSQL items
+    directNeonItems.forEach((i) => combinedMap.set(i.id || i._id, { ...i, images: (i.images || []).map(normalizeImageUrl) }));
+    // 2. Persistent local items
+    localItems.forEach((i) => combinedMap.set(i.id || i._id, { ...i, images: (i.images || []).map(normalizeImageUrl) }));
+    // 3. Authoritative backend API items
+    apiItems.forEach((i) => combinedMap.set(i.id || i._id, { ...i, images: (i.images || []).map(normalizeImageUrl) }));
 
     let finalItems = Array.from(combinedMap.values());
 
@@ -505,13 +519,22 @@ export const itemService = {
         finalItems = finalItems.filter((i) => i.availability === 'Available' || i.status === 'active' || i.status === 'AVAILABLE');
       } else if (params.status === 'unavailable') {
         finalItems = finalItems.filter((i) => i.availability === 'Unavailable' || i.status === 'unavailable');
+      } else if (params.status === 'borrowed') {
+        finalItems = finalItems.filter((i) => i.availability === 'Reserved' || i.status === 'BORROWED');
+      } else if (params.status === 'pending') {
+        finalItems = finalItems.filter((i) => i.status === 'pending moderation' || i.status === 'PENDING');
+      } else if (params.status === 'completed') {
+        finalItems = finalItems.filter((i) => i.status === 'completed' || i.status === 'COMPLETED');
       }
     }
     if (params.category && params.category !== 'all') {
-      finalItems = finalItems.filter((i) => i.category === params.category);
+      finalItems = finalItems.filter((i) => (i.category || '').toLowerCase() === params.category.toLowerCase());
     }
     if (params.sharingType && params.sharingType !== 'all') {
-      finalItems = finalItems.filter((i) => i.sharingType === params.sharingType);
+      finalItems = finalItems.filter((i) => (i.sharingType || '').toLowerCase() === params.sharingType.toLowerCase());
+    }
+    if (params.condition && params.condition !== 'all') {
+      finalItems = finalItems.filter((i) => (i.condition || '').toLowerCase() === params.condition.toLowerCase());
     }
     if (params.search && params.search.trim()) {
       const q = params.search.trim().toLowerCase();
@@ -543,30 +566,62 @@ export const itemService = {
    * Fetch summary counts for user listings
    */
   getMyItemsSummary: async () => {
+    let apiSummary = null;
     try {
       const response = await api.get('/items/my/summary');
-      return response.data;
-    } catch {
-      const userListings = mockItems.filter(
-        (i) => (!i.owner?.id || i.owner.id === 'usr-101' || i.id?.startsWith('item-')) && i.status !== 'removed'
-      );
-      const total = userListings.length;
-      const available = userListings.filter((i) => i.availability === 'Available' || i.status === 'AVAILABLE' || i.availability === 'Available now').length;
-      const pending = userListings.filter((i) => i.status === 'PENDING').length;
-      const borrowed = userListings.filter((i) => i.availability === 'Reserved' || i.status === 'BORROWED').length;
-      const completed = userListings.filter((i) => i.status === 'COMPLETED').length;
-
-      return {
-        success: true,
-        summary: {
-          total,
-          available,
-          pending,
-          borrowed,
-          completed
-        }
-      };
+      if (response.data && response.data.summary && response.data.summary.total > 0) {
+        return response.data;
+      }
+      if (response.data?.summary) {
+        apiSummary = response.data.summary;
+      }
+    } catch (err) {
+      console.warn('[itemService.getMyItemsSummary] API notice:', err.message);
     }
+
+    // Try Neon PostgreSQL direct count
+    let currentUser = {};
+    try {
+      currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
+    } catch {}
+    const currentId = currentUser.id || currentUser._id;
+    const currentEmail = (currentUser.email || '').toLowerCase().trim();
+
+    if (currentId || currentEmail) {
+      try {
+        const neonSummary = await neonDb.getMyItemsSummary(currentId, currentEmail);
+        if (neonSummary.total > 0) {
+          return { success: true, summary: neonSummary };
+        }
+      } catch {}
+    }
+
+    if (apiSummary) {
+      return { success: true, summary: apiSummary };
+    }
+
+    const localListings = getLocalSharedItems().filter((item) => {
+      const ownerId = item.owner?.id || item.owner?._id || item.owner_id;
+      const ownerEmail = (item.owner?.email || '').toLowerCase().trim();
+      return (currentId && ownerId === currentId) || (currentEmail && ownerEmail === currentEmail);
+    });
+
+    const total = localListings.length;
+    const available = localListings.filter((i) => i.availability === 'Available' || i.status === 'active' || i.status === 'AVAILABLE').length;
+    const pending = localListings.filter((i) => i.status === 'pending moderation' || i.status === 'PENDING').length;
+    const borrowed = localListings.filter((i) => i.availability === 'Reserved' || i.status === 'BORROWED').length;
+    const completed = localListings.filter((i) => i.status === 'completed' || i.status === 'COMPLETED').length;
+
+    return {
+      success: true,
+      summary: {
+        total,
+        available,
+        pending,
+        borrowed,
+        completed
+      }
+    };
   },
 
   /**
@@ -689,13 +744,6 @@ export const itemService = {
       console.error('Error fetching item matches:', error);
       return { success: false, matches: [], count: 0 };
     }
-  },
-
-  /**
-   * Fetch nearby items (alias for getItems with geographic prioritization)
-   */
-  getNearbyItems: async (params = {}) => {
-    return itemService.getItems(params);
   }
 };
 

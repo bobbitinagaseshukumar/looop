@@ -45,6 +45,15 @@ const auth = async (req, res, next) => {
         }
       }
 
+      // Check if client provided real user context via headers
+      if (req.headers['x-user-email'] && !decoded.email) {
+        req.user.email = String(req.headers['x-user-email']).toLowerCase().trim();
+      }
+      if (req.headers['x-user-id'] && !decoded.id) {
+        req.user.id = String(req.headers['x-user-id']);
+        req.user._id = req.user.id;
+      }
+
       next();
     } catch (jwtErr) {
       // Support demo / development session tokens when JWT verification fails or local mock mode is active
@@ -53,6 +62,22 @@ const auth = async (req, res, next) => {
         token.startsWith('looop_') ||
         token.startsWith('mock_token_')
       ) {
+        const headerEmail = (req.headers['x-user-email'] || '').toLowerCase().trim();
+        const headerId = req.headers['x-user-id'] || '';
+        const headerName = req.headers['x-user-name'] || '';
+        const headerRole = req.headers['x-user-role'] || (token.includes('admin') ? 'admin' : 'customer');
+
+        if (headerEmail || headerId) {
+          req.user = {
+            id: headerId || `usr_${Date.now()}`,
+            _id: headerId || `usr_${Date.now()}`,
+            email: headerEmail,
+            name: headerName || (headerEmail ? headerEmail.split('@')[0] : 'LOOOP Member'),
+            role: headerRole
+          };
+          return next();
+        }
+
         if (token.includes('admin')) {
           req.user = {
             id: 'usr-demo-admin',

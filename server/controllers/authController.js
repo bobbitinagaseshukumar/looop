@@ -298,7 +298,7 @@ exports.register = async (req, res) => {
       deliveryNotice = otpRes.message;
     }
 
-    const token = generateToken(assignedId, roleToAssign);
+    const token = generateToken(assignedId, roleToAssign, cleanEmail);
 
     return res.status(201).json({
       success: true,
@@ -724,7 +724,7 @@ exports.googleAuth = async (req, res) => {
       user = { id: newId, _id: newId, name: cleanName, email: cleanEmail, role, avatar: cleanAvatar };
     }
 
-    const token = generateToken(user.id || user._id, role);
+    const token = generateToken(user.id || user._id, role, cleanEmail);
 
     return res.status(200).json({
       success: true,

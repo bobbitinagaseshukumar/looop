@@ -3,7 +3,7 @@ import {
   Upload, Camera, Image as ImageIcon, FileText, Trash2, Crop,
   Star, ArrowLeft, ArrowRight, AlertTriangle, Loader2, CheckCircle2
 } from 'lucide-react';
-import axios from 'axios';
+import api from '../../services/api';
 import ProductImageEditorModal from './ProductImageEditorModal';
 import PdfImageExtractorModal from './PdfImageExtractorModal';
 
@@ -34,7 +34,7 @@ export default function ProductMediaUploader({ images = [], onChange, onError })
 
   const fetchUploadRules = async () => {
     try {
-      const res = await axios.get('/api/items/upload-rules');
+      const res = await api.get('/items/upload-rules');
       if (res.data?.success && res.data?.rules) {
         setRules(res.data.rules);
       }
@@ -65,11 +65,37 @@ export default function ProductMediaUploader({ images = [], onChange, onError })
     return null;
   };
 
-  const readFileAsBase64 = (file) => {
-    return new Promise((resolve, reject) => {
+  const compressImageFile = (file, maxWidth = 1200, quality = 0.82) => {
+    return new Promise((resolve) => {
+      if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(file);
+        return;
+      }
       const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = (err) => reject(err);
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          resolve(dataUrl);
+        };
+        img.onerror = () => resolve(e.target.result);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve('');
       reader.readAsDataURL(file);
     });
   };
@@ -78,13 +104,9 @@ export default function ProductMediaUploader({ images = [], onChange, onError })
     const formData = new FormData();
     formData.append('file', file);
 
-    const token = localStorage.getItem('looop_token') || localStorage.getItem('token') || '';
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-
-    const res = await axios.post('/api/items/upload-media', formData, {
+    const res = await api.post('/items/upload-media', formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
-        ...headers
+        'Content-Type': 'multipart/form-data'
       }
     });
 
@@ -129,8 +151,8 @@ export default function ProductMediaUploader({ images = [], onChange, onError })
         try {
           serverUrl = await uploadFileToServer(file);
         } catch (serverErr) {
-          console.warn('[MediaUploader] Server upload notice, generating persistent data URL:', serverErr.message);
-          serverUrl = await readFileAsBase64(file);
+          console.warn('[MediaUploader] Server upload notice, generating optimized data URL:', serverErr.message);
+          serverUrl = await compressImageFile(file);
         }
 
         const isFirst = newImages.length === 0;

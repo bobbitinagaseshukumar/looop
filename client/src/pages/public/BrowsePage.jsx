@@ -50,7 +50,7 @@ export const BrowsePage = () => {
   const sharingTypeParam = searchParams.get('sharingType') || 'all';
   const conditionParam = searchParams.get('condition') || 'all';
   const cityParam = searchParams.get('city') || '';
-  const radiusParam = searchParams.get('radius') || searchParams.get('distance') || '25';
+  const radiusParam = searchParams.get('radius') || searchParams.get('distance') || 'all';
   const sortParam = searchParams.get('sort') || 'newest';
   const latParam = searchParams.get('latitude') || '';
   const lonParam = searchParams.get('longitude') || '';
@@ -220,10 +220,6 @@ export const BrowsePage = () => {
         subcategory: subcategoryParam,
         sharingType: sharingTypeParam,
         condition: conditionParam,
-        city: cityParam || undefined,
-        radius: radiusParam !== 'all' ? radiusParam : 25,
-        latitude: latParam || (location?.latitude ? String(location.latitude) : undefined),
-        longitude: lonParam || (location?.longitude ? String(location.longitude) : undefined),
         sort: sortParam,
         page: pageParam,
         limit: 12

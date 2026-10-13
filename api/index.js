@@ -16,5 +16,11 @@ module.exports = async (req, res) => {
       console.warn('[Vercel Serverless] PostgreSQL initialization notice:', err.message);
     }
   }
+
+  // Ensure req.url has /api prefix if stripped by Vercel rewrite
+  if (req.url && !req.url.startsWith('/api') && req.url !== '/') {
+    req.url = '/api' + req.url;
+  }
+
   return app(req, res);
 };
