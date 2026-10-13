@@ -1,7 +1,7 @@
 import api from './api';
 import { mockUsers } from '../data/mockData';
 import neonDb from './neonDbService';
-import looopEmailTemplates from './emailTemplateService';
+import looopEmailTemplates, { buildLooopEmailHtml } from './emailTemplateService';
 
 // Storage key for locally registered accounts
 const LOCAL_USERS_KEY = 'looop_registered_accounts';
@@ -46,16 +46,24 @@ export const authService = {
       });
       return response.data;
     } catch (err) {
-      // If server returned 405 (Vercel static rewrite), 404, or network failure, use direct database session
       const status = err.status || err.response?.status;
-      const errStr = String(err.message || '');
-      const isFallbackNeeded = status === 405 || status === 404 || !status || errStr.includes('405') || errStr.includes('404') || errStr.includes('Cannot connect') || errStr.includes('status');
+      // Explicit backend rejection: wrong email/password or suspended account - NEVER fallback!
+      if (status === 401 || status === 403) {
+        throw new Error(err.response?.data?.message || 'Invalid email or password.');
+      }
 
-      if (isFallbackNeeded) {
+      // If backend server is unreachable (offline, network error, or 404/405), check direct database credentials
+      const errStr = String(err.message || '');
+      const isNetworkOffline = !status || status === 404 || status === 405 || errStr.includes('Network Error') || errStr.includes('Failed to fetch') || errStr.includes('Cannot connect');
+
+      if (isNetworkOffline) {
         console.warn('[LOOOP Auth] Direct database authentication activated for:', cleanEmail);
 
         // 0. Primary Super Admin: looop.support@gmail.com
-        if (cleanEmail === 'looop.support@gmail.com' && (cleanPass === 'Mahesh@Naidu' || cleanPass.length >= 6)) {
+        if (cleanEmail === 'looop.support@gmail.com') {
+          if (cleanPass !== 'Mahesh@Naidu') {
+            throw new Error('Invalid email or password.');
+          }
           const dbAdmin = await neonDb.getUserByEmail(cleanEmail);
           return {
             token: `looop_token_admin_${Date.now()}`,
@@ -74,8 +82,11 @@ export const authService = {
           };
         }
 
-        // 1. Check secondary admin: Mahesh Naidu
-        if (cleanEmail === 'maheshkuppala321@gmail.com' && (cleanPass === 'Mahesh@1' || cleanPass.length >= 6)) {
+        // 1. Secondary Admin: Mahesh Naidu
+        if (cleanEmail === 'maheshkuppala321@gmail.com') {
+          if (cleanPass !== 'Mahesh@1') {
+            throw new Error('Invalid email or password.');
+          }
           const dbAdmin = await neonDb.getUserByEmail(cleanEmail);
           return {
             token: `looop_token_admin_${Date.now()}`,
@@ -94,8 +105,11 @@ export const authService = {
           };
         }
 
-        // 2. Check default platform admin
-        if (cleanEmail === 'admin@looop.community' && (cleanPass === 'AdminPassword123!' || cleanPass.length >= 6)) {
+        // 2. Default platform admin
+        if (cleanEmail === 'admin@looop.community') {
+          if (cleanPass !== 'AdminPassword123!') {
+            throw new Error('Invalid email or password.');
+          }
           const dbAdmin = await neonDb.getUserByEmail(cleanEmail);
           return {
             token: `looop_token_admin_${Date.now()}`,
@@ -114,10 +128,29 @@ export const authService = {
           };
         }
 
-        // 3. Query Neon PostgreSQL Cloud Database directly
+        // 3. Demo accounts
+        if (cleanEmail === 'admin@reusehub.demo') {
+          if (cleanPass !== 'Admin@12345') throw new Error('Invalid email or password.');
+          return {
+            token: `looop_token_demo_${Date.now()}`,
+            user: { id: 'usr-demo-admin', _id: 'usr-demo-admin', name: 'System Admin', email: cleanEmail, role: 'admin' }
+          };
+        }
+        if (cleanEmail === 'customer@reusehub.demo') {
+          if (cleanPass !== 'Customer@12345') throw new Error('Invalid email or password.');
+          return {
+            token: `looop_token_demo_${Date.now()}`,
+            user: { id: 'usr-demo-customer', _id: 'usr-demo-customer', name: 'Demo Customer', email: cleanEmail, role: 'customer' }
+          };
+        }
+
+        // 4. Query Neon PostgreSQL Cloud Database directly
         try {
           const dbUser = await neonDb.getUserByEmail(cleanEmail);
           if (dbUser) {
+            if (dbUser.password && dbUser.password !== cleanPass && !dbUser.password.startsWith('$2')) {
+              throw new Error('Invalid email or password.');
+            }
             saveLocalUser(dbUser);
             return {
               token: `looop_token_db_${Date.now()}`,
@@ -129,61 +162,28 @@ export const authService = {
             };
           }
         } catch (dbErr) {
+          if (dbErr.message === 'Invalid email or password.') throw dbErr;
           console.warn('[LOOOP Auth] Neon lookup warning:', dbErr.message);
         }
 
-        // 4. Check locally registered users
+        // 5. Check locally registered users
         const localUsers = getLocalUsers();
         const found = localUsers.find((u) => u.email.toLowerCase() === cleanEmail);
         if (found) {
+          if (found.password && found.password !== cleanPass) {
+            throw new Error('Invalid email or password.');
+          }
           return {
             token: `looop_token_local_${Date.now()}`,
             user: { ...found }
           };
         }
 
-        // 5. Check mock accounts safely
-        const mockMatch = Object.values(mockUsers || {}).find((u) => (u.email || '').toLowerCase() === cleanEmail);
-        if (mockMatch) {
-          return {
-            token: `looop_token_mock_${Date.now()}`,
-            user: {
-              id: mockMatch.id,
-              _id: mockMatch.id,
-              name: mockMatch.name,
-              email: mockMatch.email,
-              role: mockMatch.role?.toLowerCase() || 'customer',
-              avatar: mockMatch.avatar,
-              trustScore: mockMatch.trustScore || 95
-            }
-          };
-        }
-
-        // 6. Direct Neon DB user creation & session fallback for any email (e.g. tharunkumarmallela2659@gmail.com)
-        const nameFromEmail = cleanEmail.split('@')[0].replace(/[._]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-        const userObj = {
-          id: `usr_${Date.now()}`,
-          _id: `usr_${Date.now()}`,
-          name: nameFromEmail,
-          email: cleanEmail,
-          role: cleanEmail.includes('admin') ? 'admin' : 'customer',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-          trustScore: 100,
-          rating: 5.0,
-          city: 'Guntur',
-          state: 'Andhra Pradesh'
-        };
-
-        saveLocalUser(userObj);
-        const savedPgUser = await neonDb.saveUser(userObj, cleanPass).catch(() => null);
-
-        return {
-          token: `looop_token_direct_${Date.now()}`,
-          user: savedPgUser || userObj
-        };
+        // 6. User not found anywhere
+        throw new Error('Invalid email or password. Please check your credentials.');
       }
 
-      throw err;
+      throw new Error(err.response?.data?.message || err.message || 'Invalid email or password.');
     }
   },
 
@@ -292,6 +292,58 @@ export const authService = {
       }
     }
 
+    // 3. Direct Brevo REST API fallback (ensures 100% email dispatch even if local backend is down)
+    try {
+      const brevoKey = (import.meta.env?.VITE_BREVO_API_KEY || '').trim();
+      if (!brevoKey) {
+        throw new Error('VITE_BREVO_API_KEY not configured for direct fallback.');
+      }
+      const generatedCode = String(Math.floor(100000 + Math.random() * 900000));
+      const emailHtml = buildLooopEmailHtml({
+        headline: 'Your LOOOP Verification Code',
+        recipientName: cleanEmail.split('@')[0],
+        isOtp: true,
+        otpCode: generatedCode,
+        otpExpiry: '10 minutes',
+        extraNote: 'Use this 6-digit verification code to complete your LOOOP sign-in or account verification.'
+      });
+
+      const brevoRes = await fetch('https://api.brevo.com/v3/smtp/email', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+          'api-key': brevoKey
+        },
+        body: JSON.stringify({
+          sender: { name: 'LOOOP Community', email: 'looop.support@gmail.com' },
+          to: [{ email: cleanEmail, name: cleanEmail.split('@')[0] }],
+          subject: `Your LOOOP Verification Code: ${generatedCode}`,
+          htmlContent: emailHtml
+        })
+      });
+
+      if (brevoRes.ok) {
+        sessionStorage.setItem(`looop_otp_${cleanEmail}_${purpose}`, JSON.stringify({
+          code: generatedCode,
+          expiresAt: Date.now() + 10 * 60 * 1000
+        }));
+        try {
+          await neonDb.query(
+            `INSERT INTO otp_tokens (id, email, hashed_otp, purpose, expires_at, created_at)
+             VALUES ($1, $2, $3, $4, NOW() + INTERVAL '10 minutes', NOW())`,
+            [`otp_${Date.now()}`, cleanEmail, generatedCode, purpose]
+          );
+        } catch {}
+        return {
+          success: true,
+          message: 'A 6-digit verification code has been dispatched to your email via Brevo.'
+        };
+      }
+    } catch (brevoErr) {
+      console.warn('[authService.sendOtp] Direct Brevo dispatch notice:', brevoErr.message);
+    }
+
     throw new Error('Failed to dispatch verification code via Brevo Email. Please ensure your backend server is running and try again.');
   },
 
@@ -352,6 +404,45 @@ export const authService = {
     } catch (directErr) {
       if (directErr.message && !directErr.message.includes('fetch')) {
         throw directErr;
+      }
+    }
+
+    // 3. Fallback: Verify against sessionStorage or Neon PostgreSQL
+    try {
+      const storedRaw = sessionStorage.getItem(`looop_otp_${cleanEmail}_${purpose}`);
+      if (storedRaw) {
+        const stored = JSON.parse(storedRaw);
+        if (stored.expiresAt && Date.now() > stored.expiresAt) {
+          sessionStorage.removeItem(`looop_otp_${cleanEmail}_${purpose}`);
+          throw new Error('Verification code has expired. Please request a new one.');
+        }
+        if (stored.code === cleanOtp) {
+          sessionStorage.removeItem(`looop_otp_${cleanEmail}_${purpose}`);
+          const dbUser = await neonDb.getUserByEmail(cleanEmail);
+          const finalUser = dbUser || {
+            id: `usr_${Date.now()}`,
+            _id: `usr_${Date.now()}`,
+            name: cleanEmail.split('@')[0],
+            email: cleanEmail,
+            role: cleanEmail.includes('admin') ? 'admin' : 'customer',
+            trustScore: 100,
+            rating: 5.0,
+            verified: true
+          };
+          saveLocalUser(finalUser);
+          return {
+            success: true,
+            message: 'Email address verified successfully.',
+            token: `looop_token_otp_${Date.now()}`,
+            user: finalUser
+          };
+        } else {
+          throw new Error('Invalid verification code. Please check your Brevo email and try again.');
+        }
+      }
+    } catch (fallbackErr) {
+      if (fallbackErr.message && !fallbackErr.message.includes('JSON')) {
+        throw fallbackErr;
       }
     }
 

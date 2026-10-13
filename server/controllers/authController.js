@@ -116,14 +116,6 @@ exports.login = async (req, res) => {
 
     const token = generateToken(user._id || user.id, user.role, cleanEmail);
 
-    // Dispatch Login Alert Email asynchronously via centralized emailService
-    emailService.sendLoginSecurityAlert({
-      toEmail: user.email,
-      recipientName: user.name || 'LOOOP Member',
-      device: req.headers?.['user-agent']?.includes('Mobile') ? 'Mobile Browser' : 'Chrome on Windows',
-      date: new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }),
-      time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-    }).catch((err) => console.warn('Login alert email dispatch notice:', err.message));
 
     return res.status(200).json({
       success: true,

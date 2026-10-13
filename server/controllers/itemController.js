@@ -352,6 +352,17 @@ exports.createItem = async (req, res) => {
     }
 
     // Return Neon-backed item response
+    let dbOwner = null;
+    try {
+      const uRes = await pgQuery(
+        'SELECT name, avatar, trust_score, rating, response_rate, city, locality, state, bio, verified, created_at, reviews_count FROM users WHERE id = $1 LIMIT 1;',
+        [ownerIdStr]
+      );
+      if (uRes?.rows?.[0]) {
+        dbOwner = uRes.rows[0];
+      }
+    } catch {}
+
     const finalItem = {
       _id: pgSavedItem ? pgSavedItem.id : (savedItem?._id || neonItemId),
       id: pgSavedItem ? pgSavedItem.id : (savedItem?.id || neonItemId),
@@ -368,10 +379,18 @@ exports.createItem = async (req, res) => {
       locationCoordinates: { type: 'Point', coordinates: [lng, lat] },
       owner: {
         id: ownerIdStr,
-        name: req.user?.name || 'LOOOP Member',
-        avatar: req.user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-        trustScore: req.user?.trustScore || 98,
-        rating: req.user?.rating || 4.9
+        _id: ownerIdStr,
+        name: dbOwner?.name || req.user?.name || userName || 'LOOOP Member',
+        avatar: dbOwner?.avatar || req.user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+        trustScore: dbOwner?.trust_score || req.user?.trustScore || 98,
+        rating: dbOwner?.rating || req.user?.rating || 5.0,
+        responseRate: dbOwner?.response_rate || 'Under 1 hour',
+        city: dbOwner?.city || locationObj.city || '',
+        locality: dbOwner?.locality || locationObj.locality || '',
+        state: dbOwner?.state || locationObj.state || '',
+        bio: dbOwner?.bio || '',
+        verified: dbOwner?.verified !== false,
+        memberSince: dbOwner?.created_at || new Date().toISOString()
       },
       createdAt: pgSavedItem?.created_at || new Date().toISOString(),
       updatedAt: pgSavedItem?.updated_at || new Date().toISOString()
@@ -410,7 +429,14 @@ exports.getItemById = async (req, res) => {
           u.avatar AS owner_avatar, 
           u.trust_score AS owner_trust_score, 
           u.rating AS owner_rating,
-          u.response_rate AS owner_response_rate
+          u.response_rate AS owner_response_rate,
+          u.city AS owner_city,
+          u.locality AS owner_locality,
+          u.state AS owner_state,
+          u.bio AS owner_bio,
+          u.verified AS owner_verified,
+          u.created_at AS owner_created_at,
+          u.reviews_count AS owner_reviews_count
         FROM items i 
         LEFT JOIN users u ON i.owner_id = u.id 
         WHERE i.id = $1 LIMIT 1;`,
@@ -460,7 +486,14 @@ exports.getItemById = async (req, res) => {
             avatar: row.owner_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
             trustScore: row.owner_trust_score || 95,
             rating: row.owner_rating || 5.0,
-            responseRate: row.owner_response_rate || 'Under 1 hour'
+            responseRate: row.owner_response_rate || 'Under 1 hour',
+            city: row.owner_city || row.city || '',
+            locality: row.owner_locality || row.locality || '',
+            state: row.owner_state || row.state || '',
+            bio: row.owner_bio || '',
+            verified: row.owner_verified !== false,
+            memberSince: row.owner_created_at || row.created_at,
+            reviewsCount: row.owner_reviews_count || 0
           }
         };
 
@@ -909,8 +942,8 @@ exports.discoverItems = async (req, res) => {
     // 1. Attempt to query Neon PostgreSQL Database Backend
     try {
       const whereConditions = [
-        "LOWER(i.status) = 'active'",
-        "LOWER(i.availability) = 'available'"
+        "(LOWER(i.status) = 'active' OR i.status IS NULL)",
+        "(LOWER(i.availability) = 'available' OR i.availability IS NULL)"
       ];
       const countParams = [];
 
@@ -971,8 +1004,8 @@ exports.discoverItems = async (req, res) => {
       // Data query with distance calculation
       // $1 = userLat, $2 = userLon
       const dataWhereConditions = [
-        "LOWER(i.status) = 'active'",
-        "LOWER(i.availability) = 'available'"
+        "(LOWER(i.status) = 'active' OR i.status IS NULL)",
+        "(LOWER(i.availability) = 'available' OR i.availability IS NULL)"
       ];
       const dataParams = [userLat, userLon];
 
@@ -1044,6 +1077,12 @@ exports.discoverItems = async (req, res) => {
           u.trust_score AS owner_trust_score,
           u.rating AS owner_rating,
           u.reviews_count AS owner_reviews_count,
+          u.city AS owner_city,
+          u.locality AS owner_locality,
+          u.state AS owner_state,
+          u.bio AS owner_bio,
+          u.verified AS owner_verified,
+          u.created_at AS owner_created_at,
           (
             6371 * 2 * ASIN(SQRT(
               POWER(SIN(RADIANS(($1::double precision - i.latitude) / 2)), 2) +
@@ -1109,7 +1148,13 @@ exports.discoverItems = async (req, res) => {
               avatar: row.owner_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
               trustScore: row.owner_trust_score || 95,
               rating: row.owner_rating || 5.0,
-              reviewsCount: row.owner_reviews_count || 0
+              reviewsCount: row.owner_reviews_count || 0,
+              city: row.owner_city || row.city || '',
+              locality: row.owner_locality || row.locality || '',
+              state: row.owner_state || row.state || '',
+              bio: row.owner_bio || '',
+              verified: row.owner_verified !== false,
+              memberSince: row.owner_created_at || row.created_at
             }
           };
         });

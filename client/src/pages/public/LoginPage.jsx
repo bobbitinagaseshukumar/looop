@@ -9,8 +9,6 @@ import {
   ArrowLeft,
   ShieldCheck,
   AlertCircle,
-  KeyRound,
-  Send,
   UserPlus,
   Home
 } from 'lucide-react';
@@ -30,25 +28,20 @@ export const LoginPage = () => {
   const searchParams = new URLSearchParams(location.search);
   const redirectUrl = searchParams.get('redirect');
 
-  // Auth Modes: 'password' | 'otp'
-  const [authMode, setAuthMode] = useState('password');
-
-  // Password Login Step: 'form' | 'otp'
+  // Login Step: 'form' (credentials check) -> 'otp' (only if credentials are correct)
   const [loginStep, setLoginStep] = useState('form');
   const [pendingSession, setPendingSession] = useState(null);
 
-  // Password Login State
+  // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // OTP Login State
-  const [otpEmail, setOtpEmail] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
+  // OTP Verification State
   const [otpDigits, setOtpDigits] = useState(['', '', '', '', '', '']);
   const [otpCountdown, setOtpCountdown] = useState(60);
-  const [isSendingOtp, setIsSendingOtp] = useState(false);
+  const [isResendingOtp, setIsResendingOtp] = useState(false);
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const otpInputRefs = useRef([]);
 
@@ -64,20 +57,19 @@ export const LoginPage = () => {
     const paramEmail = searchParams.get('email');
     if (paramEmail) {
       setEmail(paramEmail);
-      setOtpEmail(paramEmail);
     }
   }, [location.search]);
 
   // OTP Countdown timer
   useEffect(() => {
     let timer;
-    if ((otpSent || loginStep === 'otp') && otpCountdown > 0) {
+    if (loginStep === 'otp' && otpCountdown > 0) {
       timer = setInterval(() => {
         setOtpCountdown((prev) => prev - 1);
       }, 1000);
     }
     return () => clearInterval(timer);
-  }, [otpSent, loginStep, otpCountdown]);
+  }, [loginStep, otpCountdown]);
 
   // Store intended redirect URL in sessionStorage if present
   useEffect(() => {
@@ -117,7 +109,7 @@ export const LoginPage = () => {
     window.location.href = destUrl;
   };
 
-  // Password Form Validation
+  // Form Validation
   const validateForm = () => {
     const newErrors = {};
     if (!email.trim()) {
@@ -136,43 +128,50 @@ export const LoginPage = () => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // Submit Password Form (Step 1: Check password & send OTP for verification)
-  const handleSubmit = async (e) => {
+  // STEP 1: Verify Email and Password FIRST.
+  // ONLY IF email and password are CORRECT, send Brevo OTP email and show OTP screen!
+  const handleCredentialSubmit = async (e) => {
     e.preventDefault();
     setServerError('');
     if (!validateForm()) return;
 
     setIsSubmitting(true);
+    const targetEmail = email.trim();
+
     try {
-      // 1. Verify password credentials first
-      const response = await authService.login({
-        email: email.trim(),
+      // 1. Strictly verify email and password against server / authService
+      const loginResponse = await authService.login({
+        email: targetEmail,
         password
       });
 
-      if (response && response.token && response.user) {
-        setPendingSession(response);
-        // 2. Dispatch Brevo Email OTP code for 2-step login verification
-        try {
-          await authService.sendOtp(email.trim());
-          setOtpEmail(email.trim());
-          setLoginStep('otp');
-          setOtpDigits(['', '', '', '', '', '']);
-          setOtpCountdown(60);
-          addToast({
-            title: 'Verification Code Dispatched',
-            message: `A 6-digit login OTP code has been sent to ${email.trim()} via Brevo Email. Please check your inbox or spam folder.`,
-            variant: 'info'
-          });
-          setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
-        } catch (otpErr) {
-          console.warn('OTP dispatch notice:', otpErr?.message);
-          setServerError(otpErr.message || 'Failed to dispatch login verification code via Brevo Email. Please try again.');
-        }
-      } else {
-        throw new Error('Invalid response from authentication server.');
+      if (!loginResponse || !loginResponse.user || !loginResponse.token) {
+        throw new Error('Invalid email or password. Please try again.');
       }
+
+      // Credentials are confirmed correct! Store pending session
+      setPendingSession({
+        user: loginResponse.user,
+        token: loginResponse.token
+      });
+
+      // 2. NOW AND ONLY NOW: Dispatch the 6-digit OTP code to the user's email via Brevo
+      await authService.sendOtp(targetEmail, 'LOGIN_OTP');
+
+      // 3. Switch to OTP verification screen
+      setLoginStep('otp');
+      setOtpDigits(['', '', '', '', '', '']);
+      setOtpCountdown(60);
+
+      addToast({
+        title: 'Verification Code Dispatched',
+        message: `Credentials verified! A 6-digit login verification code has been dispatched to ${targetEmail} via Brevo Email.`,
+        variant: 'success'
+      });
+
+      setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
     } catch (err) {
+      // Credential failure or server rejection: DO NOT send email, show error message
       const errorMsg =
         err.response?.data?.message ||
         err.message ||
@@ -187,10 +186,10 @@ export const LoginPage = () => {
     }
   };
 
-  // Verify Login OTP Code (Step 2: Complete Login after OTP code check)
+  // STEP 2: Verify the 6-Digit Code Received in the Email
   const handleVerifyLoginOtp = async (e) => {
-    e.preventDefault();
-    const targetEmail = (otpEmail || email).trim();
+    if (e) e.preventDefault();
+    const targetEmail = email.trim();
     const code = otpDigits.join('');
 
     if (code.length < 6) {
@@ -202,93 +201,44 @@ export const LoginPage = () => {
     setServerError('');
 
     try {
-      await authService.verifyOtp(targetEmail, code);
-      const session = pendingSession || {
-        user: { email: targetEmail, name: targetEmail.split('@')[0], role: 'customer' },
-        token: `looop_token_${Date.now()}`
+      const verifyRes = await authService.verifyOtp(targetEmail, code, { purpose: 'LOGIN_OTP' });
+
+      const finalUser = pendingSession?.user || verifyRes?.user || {
+        email: targetEmail,
+        name: targetEmail.split('@')[0],
+        role: targetEmail.includes('admin') ? 'admin' : 'customer'
       };
-      
-      // Dispatch pleasant welcome email notification via Brevo
-      authService.sendLoginWelcomeEmail(session.user);
-      handleAuthSuccess(session.user, session.token, session.user.name);
+      const finalToken = pendingSession?.token || verifyRes?.token || `looop_token_otp_${Date.now()}`;
+
+      // Successfully verified! Log in and redirect to dashboard
+      handleAuthSuccess(finalUser, finalToken, finalUser.name);
     } catch (err) {
-      setServerError(err.message || 'Invalid or expired verification code. Please check and try again.');
+      setServerError(err.message || 'Invalid or expired verification code. Please check your Brevo email and try again.');
     } finally {
       setIsVerifyingOtp(false);
     }
   };
 
-  // Google Sign-In with Firebase & Neon DB Sync
-  const handleGoogleSignIn = async () => {
+  // Resend OTP code if needed
+  const handleResendOtp = async () => {
     setServerError('');
-    setIsGoogleLoading(true);
+    setIsResendingOtp(true);
+    const targetEmail = email.trim();
+
     try {
-      const googleUser = await signInWithGoogle();
-      if (!googleUser) return;
-
-      const result = await authService.googleLogin({
-        email: googleUser.email,
-        displayName: googleUser.displayName,
-        photoURL: googleUser.photoURL,
-        uid: googleUser.uid
-      });
-
-      if (result && result.token && result.user) {
-        authService.sendLoginWelcomeEmail(result.user);
-        handleAuthSuccess(result.user, result.token, googleUser.displayName);
-      }
-    } catch (err) {
-      console.error('Google sign-in error:', err);
-      const isDomainIssue = err.message?.includes('Authorized Domains') || err.message?.includes('unauthorized-domain');
-      if (isDomainIssue) {
-        setServerError('Firebase requires adding your domain to Authorized Domains in Firebase Console.');
-      } else {
-        setServerError(err.message || 'Google sign-in failed. Please try again.');
-      }
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
-
-  const handleSocialAuth = (providerName) => {
-    if (providerName === 'Google') {
-      handleGoogleSignIn();
-      return;
-    }
-    addToast({
-      title: `${providerName} Sign-In`,
-      message: `${providerName} OAuth sign-in integration selected. Recommended: Use Google for 1-click verification.`,
-      variant: 'info'
-    });
-  };
-
-  // Send OTP for Direct Email OTP Tab
-  const handleSendOtp = async (e) => {
-    if (e) e.preventDefault();
-    setServerError('');
-    const targetEmail = (otpEmail || email).trim();
-
-    if (!targetEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
-      setServerError('Please enter a valid email address to receive OTP.');
-      return;
-    }
-
-    setIsSendingOtp(true);
-    try {
-      await authService.sendOtp(targetEmail);
-      setOtpSent(true);
-      setOtpDigits(['', '', '', '', '', '']);
+      await authService.sendOtp(targetEmail, 'LOGIN_OTP');
       setOtpCountdown(60);
+      setOtpDigits(['', '', '', '', '', '']);
       addToast({
-        title: 'Verification Code Dispatched',
-        message: `A new 6-digit verification code has been dispatched to ${targetEmail} via Brevo Email. Please check your inbox or spam folder.`,
+        title: 'New Code Dispatched',
+        message: `A new 6-digit verification code has been dispatched to ${targetEmail} via Brevo Email.`,
         variant: 'info'
       });
       setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
     } catch (err) {
-      setServerError(err.message || 'Failed to dispatch verification code via Brevo.');
+      setServerError(err.message || 'Failed to dispatch verification code via Brevo Email.');
     } finally {
-      setIsSendingOtp(false);
+      setIsResendingOtp(false);
     }
   };
 
@@ -318,6 +268,49 @@ export const LoginPage = () => {
       setOtpDigits(newDigits);
       otpInputRefs.current[Math.min(pasted.length, 5)]?.focus();
     }
+  };
+
+  // Google Sign-In with Firebase & Neon DB Sync
+  const handleGoogleSignIn = async () => {
+    setServerError('');
+    setIsGoogleLoading(true);
+    try {
+      const googleUser = await signInWithGoogle();
+      if (!googleUser) return;
+
+      const result = await authService.googleLogin({
+        email: googleUser.email,
+        displayName: googleUser.displayName,
+        photoURL: googleUser.photoURL,
+        uid: googleUser.uid
+      });
+
+      if (result && result.token && result.user) {
+        handleAuthSuccess(result.user, result.token, googleUser.displayName);
+      }
+    } catch (err) {
+      console.error('Google sign-in error:', err);
+      const isDomainIssue = err.message?.includes('Authorized Domains') || err.message?.includes('unauthorized-domain');
+      if (isDomainIssue) {
+        setServerError('Firebase requires adding your domain to Authorized Domains in Firebase Console.');
+      } else {
+        setServerError(err.message || 'Google sign-in failed. Please try again.');
+      }
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handleSocialAuth = (providerName) => {
+    if (providerName === 'Google') {
+      handleGoogleSignIn();
+      return;
+    }
+    addToast({
+      title: `${providerName} Sign-In`,
+      message: `${providerName} OAuth sign-in integration selected. Recommended: Use Google for 1-click verification.`,
+      variant: 'info'
+    });
   };
 
   return (
@@ -372,7 +365,7 @@ export const LoginPage = () => {
         </Link>
       </header>
 
-      {/* Main Container - 100% Mobile Responsive */}
+      {/* Main Container */}
       <main
         style={{
           flex: 1,
@@ -398,26 +391,6 @@ export const LoginPage = () => {
             overflow: 'hidden'
           }}
         >
-          {/* Card Header */}
-          <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
-            <h1
-              style={{
-                fontSize: '1.6rem',
-                fontWeight: 900,
-                color: '#0f172a',
-                marginBottom: '6px',
-                letterSpacing: '-0.025em'
-              }}
-            >
-              Sign in to LOOOP
-            </h1>
-            <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
-              Share, reuse, and connect with your local community.
-            </p>
-          </div>
-
-
-
           {/* Server Error Alert */}
           {serverError && (
             <div
@@ -441,9 +414,286 @@ export const LoginPage = () => {
             </div>
           )}
 
-          {/* PASSWORD SIGN-IN & OTP VERIFICATION */}
-          {loginStep === 'otp' ? (
-            /* Step 2 of Password Login: OTP Verification */
+          {loginStep === 'form' ? (
+            /* ========================================================================= */
+            /* STEP 1: EMAIL & PASSWORD SIGN-IN                                          */
+            /* Validates credentials first; only sends Brevo OTP if credentials are valid*/
+            /* ========================================================================= */
+            <div>
+              {/* Card Header */}
+              <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+                <h1
+                  style={{
+                    fontSize: '1.6rem',
+                    fontWeight: 900,
+                    color: '#0f172a',
+                    marginBottom: '6px',
+                    letterSpacing: '-0.025em'
+                  }}
+                >
+                  Sign in to LOOOP
+                </h1>
+                <p style={{ fontSize: '0.875rem', color: '#64748b', margin: 0 }}>
+                  Share, reuse, and connect with your local community.
+                </p>
+              </div>
+
+              <form onSubmit={handleCredentialSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', boxSizing: 'border-box' }}>
+                {/* Email Address Input */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', boxSizing: 'border-box' }}>
+                  <label
+                    htmlFor="login-email"
+                    style={{
+                      fontSize: '0.825rem',
+                      fontWeight: 600,
+                      color: errors.email ? '#ef4444' : '#334155'
+                    }}
+                  >
+                    Email Address
+                  </label>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        left: '12px',
+                        color: errors.email ? '#ef4444' : '#94a3b8',
+                        pointerEvents: 'none',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Mail size={17} />
+                    </span>
+                    <input
+                      id="login-email"
+                      type="email"
+                      value={email}
+                      onChange={(e) => {
+                        setEmail(e.target.value);
+                        if (errors.email) setErrors({ ...errors, email: '' });
+                        if (serverError) setServerError('');
+                      }}
+                      placeholder="Enter your email"
+                      autoComplete="email"
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        padding: '10px 12px 10px 38px',
+                        fontSize: '0.9rem',
+                        borderRadius: '12px',
+                        border: errors.email ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
+                        outline: 'none',
+                        backgroundColor: '#ffffff',
+                        color: '#0f172a'
+                      }}
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                  {errors.email && (
+                    <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 500 }}>
+                      {errors.email}
+                    </span>
+                  )}
+                </div>
+
+                {/* Password Input */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', boxSizing: 'border-box' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <label
+                      htmlFor="login-password"
+                      style={{
+                        fontSize: '0.825rem',
+                        fontWeight: 600,
+                        color: errors.password ? '#ef4444' : '#334155'
+                      }}
+                    >
+                      Password
+                    </label>
+                    <Link
+                      to="/forgot-password"
+                      style={{
+                        fontSize: '0.78rem',
+                        color: '#047857',
+                        fontWeight: 700,
+                        textDecoration: 'none'
+                      }}
+                    >
+                      Forgot password?
+                    </Link>
+                  </div>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        left: '12px',
+                        color: errors.password ? '#ef4444' : '#94a3b8',
+                        pointerEvents: 'none',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Lock size={17} />
+                    </span>
+                    <input
+                      id="login-password"
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => {
+                        setPassword(e.target.value);
+                        if (errors.password) setErrors({ ...errors, password: '' });
+                        if (serverError) setServerError('');
+                      }}
+                      placeholder="Enter your password"
+                      autoComplete="current-password"
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        padding: '10px 40px 10px 38px',
+                        fontSize: '0.9rem',
+                        borderRadius: '12px',
+                        border: errors.password ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
+                        outline: 'none',
+                        backgroundColor: '#ffffff',
+                        color: '#0f172a'
+                      }}
+                      disabled={isSubmitting}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      style={{
+                        position: 'absolute',
+                        right: '10px',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: '#94a3b8',
+                        display: 'flex',
+                        alignItems: 'center',
+                        padding: '4px'
+                      }}
+                    >
+                      {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
+                    </button>
+                  </div>
+                  {errors.password && (
+                    <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 500 }}>
+                      {errors.password}
+                    </span>
+                  )}
+                </div>
+
+                {/* Submit Button */}
+                <div style={{ marginTop: '0.5rem', width: '100%', boxSizing: 'border-box' }}>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    size="lg"
+                    loading={isSubmitting}
+                    disabled={isSubmitting}
+                    style={{ width: '100%', borderRadius: '12px' }}
+                    iconRight={!isSubmitting ? ArrowRight : undefined}
+                  >
+                    {isSubmitting ? 'Verifying Credentials...' : 'Sign In'}
+                  </Button>
+                </div>
+              </form>
+
+              {/* SOCIAL AUTH OPTIONS */}
+              <div style={{ marginTop: '1.5rem', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1rem' }}>
+                  <div style={{ flex: 1, height: '1px', backgroundColor: '#e2e8f0' }} />
+                  <span style={{ fontSize: '0.725rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    Or connect with
+                  </span>
+                  <div style={{ flex: 1, height: '1px', backgroundColor: '#e2e8f0' }} />
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
+                  {/* Google */}
+                  <button
+                    type="button"
+                    onClick={() => handleSocialAuth('Google')}
+                    disabled={isGoogleLoading}
+                    title="Connect with Google"
+                    style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '50%',
+                      border: '1.5px solid #e2e8f0',
+                      backgroundColor: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                  </button>
+
+                  {/* Facebook */}
+                  <button
+                    type="button"
+                    onClick={() => handleSocialAuth('Facebook')}
+                    title="Connect with Facebook"
+                    style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '50%',
+                      border: '1.5px solid #e2e8f0',
+                      backgroundColor: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <svg width="20" height="20" fill="#1877F2" viewBox="0 0 24 24">
+                      <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
+                    </svg>
+                  </button>
+
+                  {/* GitHub */}
+                  <button
+                    type="button"
+                    onClick={() => handleSocialAuth('GitHub')}
+                    title="Connect with GitHub"
+                    style={{
+                      width: '42px',
+                      height: '42px',
+                      borderRadius: '50%',
+                      border: '1.5px solid #e2e8f0',
+                      backgroundColor: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      cursor: 'pointer',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
+                      transition: 'all 0.2s ease'
+                    }}
+                  >
+                    <svg width="20" height="20" fill="#24292f" viewBox="0 0 24 24">
+                      <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ========================================================================= */
+            /* STEP 2: 6-DIGIT OTP VERIFICATION SCREEN                                   */
+            /* Rendered ONLY after email and password are fully validated                 */
+            /* ========================================================================= */
             <div>
               <button
                 type="button"
@@ -465,7 +715,7 @@ export const LoginPage = () => {
                   padding: 0
                 }}
               >
-                <ArrowLeft size={16} /> Back to password sign-in
+                <ArrowLeft size={16} /> Back to Sign In
               </button>
 
               <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
@@ -487,7 +737,7 @@ export const LoginPage = () => {
                   Enter 6-Digit OTP Code
                 </h2>
                 <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
-                  For account security, enter the 6-digit login verification code sent via <strong>Brevo Email</strong> to:
+                  Credentials verified! A 6-digit login verification code was sent via <strong>Brevo Email</strong> to:
                 </p>
                 <div style={{
                   display: 'inline-block',
@@ -501,7 +751,7 @@ export const LoginPage = () => {
                   border: '1px solid #cbd5e1',
                   wordBreak: 'break-all'
                 }}>
-                  {email}
+                  {email.trim()}
                 </div>
               </div>
 
@@ -512,6 +762,7 @@ export const LoginPage = () => {
                       key={idx}
                       ref={(el) => (otpInputRefs.current[idx] = el)}
                       type="text"
+                      inputMode="numeric"
                       maxLength={1}
                       value={digit}
                       onChange={(e) => handleOtpDigitChange(idx, e.target.value)}
@@ -554,8 +805,8 @@ export const LoginPage = () => {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => handleSendOtp()}
-                    disabled={isSendingOtp}
+                    onClick={handleResendOtp}
+                    disabled={isResendingOtp}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -565,266 +816,14 @@ export const LoginPage = () => {
                       textDecoration: 'underline'
                     }}
                   >
-                    {isSendingOtp ? 'Sending...' : 'Resend Code via Brevo'}
+                    {isResendingOtp ? 'Sending...' : 'Resend Code via Brevo'}
                   </button>
                 )}
               </div>
             </div>
-          ) : (
-            /* Step 1 of Password Login: Form */
-            <form onSubmit={handleSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', boxSizing: 'border-box' }}>
-              {/* Email Address Input */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', boxSizing: 'border-box' }}>
-                <label
-                  htmlFor="login-email"
-                  style={{
-                    fontSize: '0.825rem',
-                    fontWeight: 600,
-                    color: errors.email ? '#ef4444' : '#334155'
-                  }}
-                >
-                  Email Address
-                </label>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
-                  <span
-                    style={{
-                      position: 'absolute',
-                      left: '12px',
-                      color: errors.email ? '#ef4444' : '#94a3b8',
-                      pointerEvents: 'none',
-                      display: 'flex',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <Mail size={17} />
-                  </span>
-                  <input
-                    id="login-email"
-                    type="email"
-                    value={email}
-                    onChange={(e) => {
-                      setEmail(e.target.value);
-                      if (errors.email) setErrors({ ...errors, email: '' });
-                    }}
-                    placeholder="Enter your email"
-                    autoComplete="email"
-                    style={{
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      padding: '10px 12px 10px 38px',
-                      fontSize: '0.9rem',
-                      borderRadius: '12px',
-                      border: errors.email ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
-                      outline: 'none',
-                      backgroundColor: '#ffffff',
-                      color: '#0f172a'
-                    }}
-                    disabled={isSubmitting}
-                  />
-                </div>
-                {errors.email && (
-                  <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 500 }}>
-                    {errors.email}
-                  </span>
-                )}
-              </div>
-
-              {/* Password Input */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', boxSizing: 'border-box' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label
-                    htmlFor="login-password"
-                    style={{
-                      fontSize: '0.825rem',
-                      fontWeight: 600,
-                      color: errors.password ? '#ef4444' : '#334155'
-                    }}
-                  >
-                    Password
-                  </label>
-                  <Link
-                    to="/forgot-password"
-                    style={{
-                      fontSize: '0.78rem',
-                      color: '#047857',
-                      fontWeight: 700,
-                      textDecoration: 'none'
-                    }}
-                  >
-                    Forgot password?
-                  </Link>
-                </div>
-                <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
-                  <span
-                    style={{
-                      position: 'absolute',
-                      left: '12px',
-                      color: errors.password ? '#ef4444' : '#94a3b8',
-                      pointerEvents: 'none',
-                      display: 'flex',
-                      alignItems: 'center'
-                    }}
-                  >
-                    <Lock size={17} />
-                  </span>
-                  <input
-                    id="login-password"
-                    type={showPassword ? 'text' : 'password'}
-                    value={password}
-                    onChange={(e) => {
-                      setPassword(e.target.value);
-                      if (errors.password) setErrors({ ...errors, password: '' });
-                    }}
-                    placeholder="Enter your password"
-                    autoComplete="current-password"
-                    style={{
-                      width: '100%',
-                      boxSizing: 'border-box',
-                      padding: '10px 40px 10px 38px',
-                      fontSize: '0.9rem',
-                      borderRadius: '12px',
-                      border: errors.password ? '1.5px solid #ef4444' : '1.5px solid #cbd5e1',
-                      outline: 'none',
-                      backgroundColor: '#ffffff',
-                      color: '#0f172a'
-                    }}
-                    disabled={isSubmitting}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    style={{
-                      position: 'absolute',
-                      right: '10px',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      color: '#94a3b8',
-                      display: 'flex',
-                      alignItems: 'center',
-                      padding: '4px'
-                    }}
-                  >
-                    {showPassword ? <EyeOff size={17} /> : <Eye size={17} />}
-                  </button>
-                </div>
-                {errors.password && (
-                  <span style={{ fontSize: '0.75rem', color: '#ef4444', fontWeight: 500 }}>
-                    {errors.password}
-                  </span>
-                )}
-              </div>
-
-              {/* Submit Button */}
-              <div style={{ marginTop: '0.4rem', width: '100%', boxSizing: 'border-box' }}>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="lg"
-                  loading={isSubmitting}
-                  disabled={isSubmitting}
-                  style={{ width: '100%', borderRadius: '12px' }}
-                  iconRight={!isSubmitting ? ArrowRight : undefined}
-                >
-                  {isSubmitting ? 'Verifying credentials...' : 'Sign In'}
-                </Button>
-              </div>
-            </form>
           )}
 
-          {/* BOTTOM SUBTLE SOCIAL AUTH OPTIONS (Google, Facebook, GitHub) */}
-          {loginStep === 'form' && (
-            <div style={{ marginTop: '1.25rem', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '1rem' }}>
-                <div style={{ flex: 1, height: '1px', backgroundColor: '#e2e8f0' }} />
-                <span style={{ fontSize: '0.725rem', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                  Or connect with
-                </span>
-                <div style={{ flex: 1, height: '1px', backgroundColor: '#e2e8f0' }} />
-              </div>
-
-              <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', alignItems: 'center' }}>
-                {/* Google */}
-                <button
-                  type="button"
-                  onClick={() => handleSocialAuth('Google')}
-                  disabled={isGoogleLoading}
-                  title="Connect with Google"
-                  style={{
-                    width: '42px',
-                    height: '42px',
-                    borderRadius: '50%',
-                    border: '1.5px solid #e2e8f0',
-                    backgroundColor: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                  </svg>
-                </button>
-
-                {/* Facebook */}
-                <button
-                  type="button"
-                  onClick={() => handleSocialAuth('Facebook')}
-                  title="Connect with Facebook"
-                  style={{
-                    width: '42px',
-                    height: '42px',
-                    borderRadius: '50%',
-                    border: '1.5px solid #e2e8f0',
-                    backgroundColor: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <svg width="20" height="20" fill="#1877F2" viewBox="0 0 24 24">
-                    <path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z" />
-                  </svg>
-                </button>
-
-                {/* GitHub */}
-                <button
-                  type="button"
-                  onClick={() => handleSocialAuth('GitHub')}
-                  title="Connect with GitHub"
-                  style={{
-                    width: '42px',
-                    height: '42px',
-                    borderRadius: '50%',
-                    border: '1.5px solid #e2e8f0',
-                    backgroundColor: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    cursor: 'pointer',
-                    boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-                    transition: 'all 0.2s ease'
-                  }}
-                >
-                  <svg width="20" height="20" fill="#24292f" viewBox="0 0 24 24">
-                    <path fillRule="evenodd" clipRule="evenodd" d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.53 1.032 1.53 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* Footer Navigation Link: Register (HIGHLY HIGHLIGHTED) */}
+          {/* Footer Navigation Link: Register */}
           <div
             style={{
               marginTop: '1.5rem',
@@ -871,5 +870,3 @@ export const LoginPage = () => {
 };
 
 export default LoginPage;
-
-

@@ -27,151 +27,141 @@ export function saveLocalSharedItem(item) {
 }
 
 /**
+export function normalizeImageUrl(img) {
+  if (!img) return 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
+  const urlStr = typeof img === 'string' ? img : (img.url || '');
+  if (!urlStr) return 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
+  if (urlStr.startsWith('data:') || urlStr.startsWith('http://') || urlStr.startsWith('https://')) {
+    return urlStr;
+  }
+  if (urlStr.startsWith('/uploads/')) {
+    const apiUrl = import.meta.env?.VITE_API_URL;
+    if (apiUrl && !apiUrl.startsWith('/')) {
+      try {
+        const u = new URL(apiUrl);
+        return `${u.origin}${urlStr}`;
+      } catch {}
+    }
+  }
+  return urlStr;
+}
+
+/**
  * Item Service
  * Handles discovery, nearby items, and category listings
  */
 export const itemService = {
   /**
+   * Primary Global Discovery endpoint called by BrowsePage
+   * Retrieves items from backend (Neon PostgreSQL) with search, filter, proximity, and pagination.
+   */
+  discoverItems: async (params = {}) => {
+    try {
+      const response = await api.get('/items/discover', { params });
+      if (response.data && response.data.success) {
+        const rawItems = response.data.items || [];
+        const items = rawItems.map((item) => ({
+          ...item,
+          id: item._id || item.id,
+          images: (item.images || []).map(normalizeImageUrl)
+        }));
+
+        // Merge any newly created local items by this customer to ensure zero latency
+        const localItems = getLocalSharedItems();
+        if (localItems.length > 0) {
+          const itemMap = new Map();
+          localItems.forEach((i) => {
+            const key = i.id || i._id;
+            if (key) itemMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
+          });
+          items.forEach((i) => {
+            const key = i.id || i._id;
+            if (key) itemMap.set(key, i);
+          });
+          const combined = Array.from(itemMap.values());
+          return {
+            success: true,
+            items: combined.slice(0, params.limit || 12),
+            total: Math.max(response.data.total || 0, combined.length),
+            page: response.data.page || 1,
+            totalPages: Math.ceil(Math.max(response.data.total || 0, combined.length) / (params.limit || 12)) || 1,
+            limit: response.data.limit || 12
+          };
+        }
+
+        return {
+          success: true,
+          items,
+          total: response.data.total || items.length,
+          page: response.data.page || 1,
+          totalPages: response.data.totalPages || 1,
+          limit: response.data.limit || 12
+        };
+      }
+    } catch (apiErr) {
+      console.warn('[itemService.discoverItems] Discovery API notice:', apiErr.message);
+    }
+
+    // Fallback to getItems if /items/discover is unavailable
+    try {
+      const res = await itemService.getItems(params);
+      return {
+        success: true,
+        items: res.items || [],
+        total: res.total || (res.items || []).length,
+        page: res.page || 1,
+        totalPages: res.totalPages || 1,
+        limit: res.limit || 12
+      };
+    } catch {
+      return {
+        success: false,
+        items: [],
+        total: 0,
+        page: 1,
+        totalPages: 1,
+        limit: 12
+      };
+    }
+  },
+
+  /**
    * Fetch paginated and filtered items for Browse & Discovery
-   * Combines backend database items with catalog items to ensure all community and requested items are shown.
-   * @param {Object} params - { search, category, sharingType, condition, distance, availability, sort, page, limit }
    */
   getItems: async (params = {}) => {
-    const {
-      search = '',
-      category = 'all',
-      sharingType = 'all',
-      condition = 'all',
-      distance = 'all',
-      availability = 'available',
-      sort = 'newest',
-      page = 1,
-      limit = 12
-    } = params;
-
-    let allItems = [];
-
     try {
-      const response = await api.get('/items', { params: { limit: 100 } });
+      const response = await api.get('/items', { params: { ...params, limit: params.limit || 50 } });
       const apiItems = response.data?.items || (Array.isArray(response.data) ? response.data : []);
-
       const normalizedApi = apiItems.map((item) => ({
         ...item,
         id: item._id || item.id,
-        images: (item.images || []).map((img) => (typeof img === 'string' ? img : img.url || ''))
+        images: (item.images || []).map(normalizeImageUrl)
       }));
 
-      // Use strictly real backend database items
-      allItems = normalizedApi;
-    } catch {
-      allItems = [...mockItems];
+      // Merge persistent local items
+      const localItems = getLocalSharedItems();
+      const combinedMap = new Map();
+      localItems.forEach((i) => combinedMap.set(i.id || i._id, { ...i, images: (i.images || []).map(normalizeImageUrl) }));
+      normalizedApi.forEach((i) => combinedMap.set(i.id || i._id, i));
+      const allItems = Array.from(combinedMap.values());
+
+      return {
+        items: allItems.slice(0, params.limit || 12),
+        total: allItems.length,
+        page: 1,
+        limit: params.limit || 12,
+        totalPages: Math.ceil(allItems.length / (params.limit || 12)) || 1
+      };
+    } catch (err) {
+      console.warn('[itemService.getItems] fallback notice:', err.message);
+      return {
+        items: mockItems.slice(0, params.limit || 12),
+        total: mockItems.length,
+        page: 1,
+        limit: params.limit || 12,
+        totalPages: Math.ceil(mockItems.length / (params.limit || 12)) || 1
+      };
     }
-
-    // Merge persistent local items
-    const localItems = getLocalSharedItems();
-    const combinedMap = new Map();
-    allItems.forEach((i) => combinedMap.set(i.id || i._id, i));
-    localItems.forEach((i) => {
-      const key = i.id || i._id;
-      if (!combinedMap.has(key)) combinedMap.set(key, i);
-    });
-    allItems = Array.from(combinedMap.values());
-
-    let filtered = [...allItems];
-
-    // 1. Keyword search (title, description, category, location)
-    if (search && search.trim()) {
-      const query = search.trim().toLowerCase();
-      filtered = filtered.filter((item) => {
-        const inTitle = item.title?.toLowerCase().includes(query);
-        const inDesc = item.description?.toLowerCase().includes(query);
-        const inCat = item.category?.toLowerCase().includes(query);
-        const locStr = typeof item.location === 'string'
-          ? item.location
-          : (item.location?.city || item.location?.locality || item.city || item.locality || '');
-        const inLoc = locStr.toLowerCase().includes(query);
-        return inTitle || inDesc || inCat || inLoc;
-      });
-    }
-
-    // 2. Category filter
-    if (category && category !== 'all') {
-      filtered = filtered.filter((item) => {
-        if (category === 'clothing') return item.category === 'clothes' || item.category === 'clothing';
-        if (category === 'home') return item.category === 'kitchen' || item.category === 'home';
-        return item.category === category;
-      });
-    }
-
-    // 3. Sharing Type filter
-    if (sharingType && sharingType !== 'all') {
-      filtered = filtered.filter((item) => {
-        if (sharingType === 'free') return item.sharingType === 'give_away';
-        return item.sharingType === sharingType;
-      });
-    }
-
-    // 4. Condition filter
-    if (condition && condition !== 'all') {
-      filtered = filtered.filter((item) => item.condition === condition);
-    }
-
-    // 5. Distance filter
-    if (distance && distance !== 'all') {
-      const maxKm = parseFloat(distance);
-      if (!isNaN(maxKm)) {
-        filtered = filtered.filter((item) => {
-          const match = item.location?.match(/~?([0-9.]+)\s*km/);
-          if (match && match[1]) {
-            const itemKm = parseFloat(match[1]);
-            return itemKm <= maxKm;
-          }
-          return true;
-        });
-      }
-    }
-
-    // 6. Availability filter
-    if (availability === 'available') {
-      filtered = filtered.filter((item) => item.status === 'AVAILABLE' || item.availability === 'Available' || !item.status);
-    }
-
-    // 7. Sorting
-    filtered.sort((a, b) => {
-      if (sort === 'newest') {
-        return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
-      }
-      if (sort === 'nearest') {
-        const kmA = parseFloat(a.location?.match(/~?([0-9.]+)\s*km/)?.[1] || '99');
-        const kmB = parseFloat(b.location?.match(/~?([0-9.]+)\s*km/)?.[1] || '99');
-        return kmA - kmB;
-      }
-      if (sort === 'recently_updated') {
-        return (b.viewsCount || 0) - (a.viewsCount || 0);
-      }
-      if (sort === 'most_relevant') {
-        return (b.savesCount || 0) - (a.savesCount || 0);
-      }
-      return 0;
-    });
-
-    // 8. Pagination calculation
-    const total = filtered.length;
-    const currentPage = Math.max(1, parseInt(page, 10));
-    const pageSize = Math.max(1, parseInt(limit, 10));
-    const startIndex = (currentPage - 1) * pageSize;
-    const paginatedItems = filtered.slice(startIndex, startIndex + pageSize);
-    const totalPages = Math.ceil(total / pageSize) || 1;
-
-    return {
-      items: paginatedItems,
-      total,
-      page: currentPage,
-      limit: pageSize,
-      totalPages,
-      hasNextPage: currentPage < totalPages,
-      hasPrevPage: currentPage > 1
-    };
   },
 
   /**
@@ -216,9 +206,38 @@ export const itemService = {
 
   /**
    * Fetch single item by ID
+   * Queries real backend (Neon PostgreSQL) first before fallbacks
    */
   getItemById: async (id) => {
-    // 1. Check mock items first (by id, _id, slug, or slugified title)
+    if (!id) return null;
+
+    // 1. Fetch from real backend API first
+    try {
+      const response = await api.get(`/items/${id}`);
+      const raw = response.data?.item || response.data;
+      if (raw && (raw.title || raw._id || raw.id)) {
+        return {
+          ...raw,
+          id: raw._id || raw.id,
+          images: (raw.images || []).map(normalizeImageUrl)
+        };
+      }
+    } catch (apiErr) {
+      console.warn(`[itemService.getItemById] API fetch notice for ${id}:`, apiErr.message);
+    }
+
+    // 2. Check persistent local shared items
+    const localItems = getLocalSharedItems();
+    const localMatch = localItems.find((i) => i.id === id || i._id === id);
+    if (localMatch) {
+      return {
+        ...localMatch,
+        id: localMatch.id || localMatch._id,
+        images: (localMatch.images || []).map(normalizeImageUrl)
+      };
+    }
+
+    // 3. Check mock items as last fallback
     const cleanId = String(id || '').toLowerCase().trim();
     const mockMatch = mockItems.find(
       (i) =>
@@ -231,25 +250,11 @@ export const itemService = {
       return {
         ...mockMatch,
         id: mockMatch.id,
-        images: (mockMatch.images || []).map((img) => (typeof img === 'string' ? img : img.url || ''))
+        images: (mockMatch.images || []).map(normalizeImageUrl)
       };
     }
 
-    // 2. Fetch from backend API
-    try {
-      const response = await api.get(`/items/${id}`);
-      const raw = response.data?.item || response.data;
-      if (raw && (raw.title || raw._id || raw.id)) {
-        return {
-          ...raw,
-          id: raw._id || raw.id,
-          images: (raw.images || []).map((img) => (typeof img === 'string' ? img : img.url || ''))
-        };
-      }
-      return null;
-    } catch {
-      return null;
-    }
+    return null;
   },
 
   /**

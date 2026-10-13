@@ -65,11 +65,20 @@ export default function ProductMediaUploader({ images = [], onChange, onError })
     return null;
   };
 
+  const readFileAsBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
+
   const uploadFileToServer = async (file) => {
     const formData = new FormData();
     formData.append('file', file);
 
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('looop_token') || localStorage.getItem('token') || '';
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
     const res = await axios.post('/api/items/upload-media', formData, {
@@ -120,8 +129,8 @@ export default function ProductMediaUploader({ images = [], onChange, onError })
         try {
           serverUrl = await uploadFileToServer(file);
         } catch (serverErr) {
-          console.warn('[MediaUploader] Server upload failed, generating local fallback URL:', serverErr.message);
-          serverUrl = URL.createObjectURL(file);
+          console.warn('[MediaUploader] Server upload notice, generating persistent data URL:', serverErr.message);
+          serverUrl = await readFileAsBase64(file);
         }
 
         const isFirst = newImages.length === 0;

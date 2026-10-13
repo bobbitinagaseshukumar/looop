@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, ArrowRight } from 'lucide-react';
+import { ShieldCheck, ArrowRight, MapPin, Award, Clock } from 'lucide-react';
 import Avatar from '../common/Avatar';
 
 export const OwnerProfileCard = ({ owner }) => {
@@ -9,6 +9,7 @@ export const OwnerProfileCard = ({ owner }) => {
   const displayName = owner.name || 'Community Sharer';
   const ownerId = owner._id || owner.id;
   const isVerified = owner.verified !== false;
+  const locationText = [owner.locality, owner.city].filter(Boolean).join(', ') || owner.approximateAddress || '';
 
   return (
     <div
@@ -70,9 +71,44 @@ export const OwnerProfileCard = ({ owner }) => {
               {displayName}
             </h3>
           )}
-          <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 500 }}>
-            Active Looop Member
-          </span>
+          
+          {locationText ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '0.8rem', color: '#64748b', marginTop: '2px' }}>
+              <MapPin size={12} color="#059669" />
+              <span>{locationText}</span>
+            </div>
+          ) : (
+            <span style={{ fontSize: '0.78rem', color: '#64748b', fontWeight: 500 }}>
+              Active Looop Member
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Owner Bio if available */}
+      {owner.bio && (
+        <div style={{
+          backgroundColor: '#f8fafc',
+          borderRadius: '8px',
+          padding: '8px 12px',
+          fontSize: '0.825rem',
+          color: '#475569',
+          fontStyle: 'italic',
+          lineHeight: 1.4
+        }}>
+          "{owner.bio}"
+        </div>
+      )}
+
+      {/* Trust & Response Stats */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', paddingTop: '4px', borderTop: '1px solid #f8fafc', fontSize: '0.78rem', color: '#64748b' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <Award size={13} color="#059669" />
+          <span>{owner.trustScore || 95}% Trust Score</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <Clock size={13} color="#64748b" />
+          <span>Responds {owner.responseRate || 'within 1 hour'}</span>
         </div>
       </div>
 
@@ -111,4 +147,5 @@ export const OwnerProfileCard = ({ owner }) => {
 };
 
 export default OwnerProfileCard;
+
 
