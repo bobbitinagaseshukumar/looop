@@ -30,6 +30,7 @@ export const AdminTable = ({
         <table
           style={{
             width: '100%',
+            minWidth: '980px',
             borderCollapse: 'collapse',
             textAlign: 'left',
             fontSize: '0.875rem'
@@ -124,6 +125,21 @@ export const AdminTable = ({
           </tbody>
         </table>
       </div>
+      <style>{`
+        .admin-table-scroll::-webkit-scrollbar {
+          height: 7px;
+        }
+        .admin-table-scroll::-webkit-scrollbar-track {
+          background: #0f172a;
+        }
+        .admin-table-scroll::-webkit-scrollbar-thumb {
+          background: #334155;
+          border-radius: 4px;
+        }
+        .admin-table-scroll::-webkit-scrollbar-thumb:hover {
+          background: #475569;
+        }
+      `}</style>
     </div>
   );
 };

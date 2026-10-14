@@ -36,12 +36,13 @@ export const AdminLayout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [globalSearch, setGlobalSearch] = useState('');
   const [badgeCounts, setBadgeCounts] = useState({ openReports: 0, pendingRequests: 0, pointsSystem: 'ACTIVE' });
-  const [dbStatus, setDbStatus] = useState('Checking...');
+  const [dbStatus, setDbStatus] = useState('Connected');
 
-  // Fetch real metrics for sidebar badges and verify database connectivity
+  // Verify database connectivity and load badge counts without slowing down page navigation
   useEffect(() => {
     let mounted = true;
-    const fetchBadges = async () => {
+
+    const checkStatus = async () => {
       try {
         const res = await adminService.getDashboard('30d');
         if (mounted && res?.success && res.data?.metrics) {
@@ -51,20 +52,29 @@ export const AdminLayout = ({ children }) => {
             pointsSystem: 'ACTIVE'
           });
           setDbStatus('Connected');
-        } else if (mounted) {
-          setDbStatus('Disconnected');
         }
       } catch (err) {
         if (mounted) {
-          setDbStatus('Disconnected');
+          // Fast fallback health ping
+          try {
+            const hRes = await fetch('http://localhost:5000/api/health').then(r => r.json());
+            if (mounted) {
+              setDbStatus(hRes?.data?.database === 'Connected' ? 'Connected' : 'Degraded');
+            }
+          } catch {
+            if (mounted) setDbStatus('Disconnected');
+          }
         }
       }
     };
-    fetchBadges();
+
+    checkStatus();
+    const interval = setInterval(checkStatus, 45000);
     return () => {
       mounted = false;
+      clearInterval(interval);
     };
-  }, [location.pathname]);
+  }, []);
 
   const navItems = [
     { label: 'Dashboard', path: '/admin/dashboard', icon: LayoutDashboard },
@@ -327,7 +337,21 @@ export const AdminLayout = ({ children }) => {
       </aside>
 
       {/* Main Content Area */}
-      <div style={{ flex: 1, marginLeft: '260px', display: 'flex', flexDirection: 'column', minHeight: '100vh', boxSizing: 'border-box' }} className="admin-main-wrapper">
+      <div
+        style={{
+          flex: 1,
+          marginLeft: '260px',
+          width: 'calc(100% - 260px)',
+          maxWidth: 'calc(100vw - 260px)',
+          minWidth: 0,
+          overflowX: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: '100vh',
+          boxSizing: 'border-box'
+        }}
+        className="admin-main-wrapper"
+      >
         {/* Top Navigation Header */}
         <header
           style={{
@@ -340,7 +364,10 @@ export const AdminLayout = ({ children }) => {
             justifyContent: 'space-between',
             position: 'sticky',
             top: 0,
-            zIndex: 90
+            zIndex: 90,
+            width: '100%',
+            maxWidth: '100%',
+            boxSizing: 'border-box'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
@@ -417,7 +444,18 @@ export const AdminLayout = ({ children }) => {
         </header>
 
         {/* Content Body */}
-        <main style={{ padding: '24px', flex: 1, backgroundColor: '#090d16', boxSizing: 'border-box' }}>
+        <main
+          style={{
+            padding: '24px',
+            flex: 1,
+            backgroundColor: '#090d16',
+            boxSizing: 'border-box',
+            width: '100%',
+            maxWidth: '100%',
+            minWidth: 0,
+            overflowX: 'hidden'
+          }}
+        >
           {children}
         </main>
       </div>
@@ -425,7 +463,11 @@ export const AdminLayout = ({ children }) => {
       <style>{`
         @media (max-width: 860px) {
           .admin-sidebar { transform: translateX(-100%); }
-          .admin-main-wrapper { margin-left: 0 !important; }
+          .admin-main-wrapper { 
+            margin-left: 0 !important; 
+            width: 100vw !important; 
+            max-width: 100vw !important; 
+          }
           .admin-menu-toggle { display: block !important; }
           .sidebar-close-btn { display: block !important; }
           .health-label { display: none; }

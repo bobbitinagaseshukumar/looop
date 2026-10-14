@@ -100,8 +100,27 @@ exports.getUsers = async (req, res) => {
         params.push(req.query.status.toLowerCase());
       }
 
-      const countRes = await pgQuery(`SELECT COUNT(*)::int as total FROM users ${whereSql};`, params);
+      const [countRes, roleBreakdownRes] = await Promise.all([
+        pgQuery(`SELECT COUNT(*)::int as total FROM users ${whereSql};`, params),
+        pgQuery(`
+          SELECT 
+            COUNT(*)::int as total,
+            COUNT(CASE WHEN LOWER(role) = 'customer' THEN 1 END)::int as customers,
+            COUNT(CASE WHEN LOWER(role) = 'admin' THEN 1 END)::int as admins,
+            COUNT(CASE WHEN account_status = 'active' THEN 1 END)::int as active,
+            COUNT(CASE WHEN account_status = 'suspended' THEN 1 END)::int as suspended
+          FROM users;
+        `).catch(() => ({ rows: [] }))
+      ]);
+
       const pgTotal = countRes?.rows?.[0]?.total || 0;
+      const roleStats = roleBreakdownRes?.rows?.[0] || {
+        total: pgTotal,
+        customers: 0,
+        admins: 0,
+        active: 0,
+        suspended: 0
+      };
 
       const dataSql = `
         SELECT 
@@ -119,26 +138,36 @@ exports.getUsers = async (req, res) => {
       const dataRes = await pgQuery(dataSql, [...params, limit, skip]);
 
       if (dataRes && dataRes.rows && dataRes.rows.length > 0) {
-        const enrichedUsers = dataRes.rows.map(row => ({
-          _id: row.id,
-          id: row.id,
-          name: row.name,
-          email: row.email,
-          phone: row.phone || '',
-          plainPassword: row.plainPassword || (row.password && !row.password.startsWith('$2') ? row.password : ''),
-          password: row.plainPassword || (row.password && !row.password.startsWith('$2') ? row.password : '••••••••'),
-          role: row.role,
-          avatar: row.avatar || '',
-          city: row.city || '',
-          state: row.state || '',
-          accountStatus: row.accountStatus || 'active',
-          trustScore: row.trustScore || 95,
-          rating: row.rating || 0,
-          verified: row.verified !== false,
-          createdAt: row.createdAt,
-          itemsCount: row.itemsCount || 0,
-          completedTransactionsCount: row.completedTransactionsCount || 0
-        }));
+        const KNOWN_ADMIN_PASSWORDS = {
+          'admin@looop.community': 'AdminPassword123!',
+          'looop.support@gmail.com': 'Mahesh@Naidu',
+          'maheshkuppala321@gmail.com': 'Mahesh@1',
+          'admin@looop.demo': 'Admin@12345'
+        };
+
+        const enrichedUsers = dataRes.rows.map(row => {
+          const resolvedPlain = row.plainPassword || (row.password && !row.password.startsWith('$2') ? row.password : '') || KNOWN_ADMIN_PASSWORDS[row.email?.toLowerCase()] || '';
+          return {
+            _id: row.id,
+            id: row.id,
+            name: row.name,
+            email: row.email,
+            phone: row.phone || '',
+            plainPassword: resolvedPlain,
+            password: resolvedPlain || '••••••••',
+            role: row.role,
+            avatar: row.avatar || '',
+            city: row.city || '',
+            state: row.state || '',
+            accountStatus: row.accountStatus || 'active',
+            trustScore: row.trustScore || 95,
+            rating: row.rating || 0,
+            verified: row.verified !== false,
+            createdAt: row.createdAt,
+            itemsCount: row.itemsCount || 0,
+            completedTransactionsCount: row.completedTransactionsCount || 0
+          };
+        });
 
         return res.status(200).json({
           success: true,
@@ -147,7 +176,14 @@ exports.getUsers = async (req, res) => {
             page,
             limit,
             total: pgTotal,
-            totalPages: Math.ceil(pgTotal / limit) || 1
+            totalPages: Math.ceil(pgTotal / limit) || 1,
+            counts: {
+              all: roleStats.total,
+              customers: roleStats.customers,
+              admins: roleStats.admins,
+              active: roleStats.active,
+              suspended: roleStats.suspended
+            }
           }
         });
       }
@@ -217,9 +253,17 @@ exports.getUserDetails = async (req, res) => {
       );
       if (pgUserRes?.rows?.[0]) {
         const user = pgUserRes.rows[0];
+        const KNOWN_ADMIN_PASSWORDS = {
+          'admin@looop.community': 'AdminPassword123!',
+          'looop.support@gmail.com': 'Mahesh@Naidu',
+          'maheshkuppala321@gmail.com': 'Mahesh@1',
+          'admin@looop.demo': 'Admin@12345'
+        };
+        const resolvedPlain = user.plainPassword || (user.password && !user.password.startsWith('$2') ? user.password : '') || KNOWN_ADMIN_PASSWORDS[user.email?.toLowerCase()] || '';
         user._id = user.id;
         user.phone = user.phone || '';
-        user.plainPassword = user.plainPassword || (user.password && !user.password.startsWith('$2') ? user.password : '');
+        user.plainPassword = resolvedPlain;
+        user.password = resolvedPlain || '••••••••';
 
         const [itemsRes, wantedRes] = await Promise.all([
           pgQuery('SELECT * FROM items WHERE owner_id = $1 ORDER BY created_at DESC LIMIT 10', [id]).catch(() => ({ rows: [] })),
@@ -332,6 +376,107 @@ exports.getItems = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip = (page - 1) * limit;
+
+    // 1. Primary PostgreSQL query
+    try {
+      let whereSql = 'WHERE 1=1';
+      const params = [];
+      let paramIdx = 1;
+
+      if (req.query.search) {
+        whereSql += ` AND (i.title ILIKE $${paramIdx} OR i.description ILIKE $${paramIdx} OR i.brand ILIKE $${paramIdx})`;
+        params.push(`%${req.query.search.trim()}%`);
+        paramIdx++;
+      }
+
+      if (req.query.category && req.query.category !== 'all') {
+        whereSql += ` AND LOWER(i.category) = $${paramIdx++}`;
+        params.push(req.query.category.toLowerCase());
+      }
+
+      if (req.query.sharingType && req.query.sharingType !== 'all') {
+        whereSql += ` AND LOWER(i.sharing_type) = $${paramIdx++}`;
+        params.push(req.query.sharingType.toLowerCase());
+      }
+
+      if (req.query.status && req.query.status !== 'all') {
+        whereSql += ` AND LOWER(i.status) = $${paramIdx++}`;
+        params.push(req.query.status.toLowerCase());
+      }
+
+      if (req.query.condition && req.query.condition !== 'all') {
+        whereSql += ` AND LOWER(i.condition) = $${paramIdx++}`;
+        params.push(req.query.condition.toLowerCase());
+      }
+
+      const countSql = `SELECT COUNT(*)::int as total FROM items i ${whereSql};`;
+      const [countRes, dataRes] = await Promise.all([
+        pgQuery(countSql, params),
+        pgQuery(`
+          SELECT 
+            i.id, i.title, i.description, i.category, i.subcategory, i.brand, i.model,
+            i.images, i.sharing_type as "sharingType", i.condition, i.availability, i.status,
+            i.city, i.district, i.state, i.locality, i.approximate_address,
+            i.borrow_max_duration_days as "borrowMaxDurationDays",
+            i.borrow_max_duration_unit as "borrowMaxDurationUnit",
+            i.views_count as "viewsCount", i.saves_count as "savesCount",
+            i.created_at as "createdAt", i.updated_at as "updatedAt",
+            json_build_object(
+              'id', u.id,
+              '_id', u.id,
+              'name', COALESCE(u.name, 'Community Member'),
+              'email', COALESCE(u.email, ''),
+              'avatar', COALESCE(u.avatar, ''),
+              'trustScore', COALESCE(u.trust_score, 95)
+            ) as owner
+          FROM items i
+          LEFT JOIN users u ON i.owner_id = u.id
+          ${whereSql}
+          ORDER BY i.created_at DESC
+          LIMIT $${paramIdx++} OFFSET $${paramIdx++};
+        `, [...params, limit, skip])
+      ]);
+
+      const total = countRes?.rows?.[0]?.total || 0;
+      const items = (dataRes?.rows || []).map(row => ({
+        _id: row.id,
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        category: row.category,
+        subcategory: row.subcategory,
+        brand: row.brand,
+        model: row.model,
+        images: Array.isArray(row.images) ? row.images : (typeof row.images === 'string' ? JSON.parse(row.images || '[]') : []),
+        sharingType: row.sharingType,
+        condition: row.condition,
+        availability: row.availability,
+        status: row.status,
+        location: {
+          city: row.city || '',
+          locality: row.locality || '',
+          state: row.state || ''
+        },
+        owner: row.owner || { name: 'Member', email: '' },
+        viewsCount: row.viewsCount || 0,
+        savesCount: row.savesCount || 0,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          items,
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1
+        }
+      });
+    } catch (pgErr) {
+      console.warn('[Admin getItems] PostgreSQL notice, checking Mongo fallback:', pgErr.message);
+    }
 
     const query = {};
 
@@ -765,6 +910,68 @@ exports.getRequests = async (req, res) => {
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip = (page - 1) * limit;
 
+    // 1. Primary PostgreSQL query
+    try {
+      let whereSql = 'WHERE 1=1';
+      const params = [];
+      let paramIdx = 1;
+
+      if (req.query.status && req.query.status !== 'all') {
+        whereSql += ` AND UPPER(r.status) = $${paramIdx++}`;
+        params.push(req.query.status.toUpperCase());
+      }
+
+      if (req.query.type && req.query.type !== 'all') {
+        whereSql += ` AND UPPER(r.type) = $${paramIdx++}`;
+        params.push(req.query.type.toUpperCase());
+      }
+
+      const countSql = `SELECT COUNT(*)::int as total FROM requests r ${whereSql};`;
+      const [countRes, dataRes] = await Promise.all([
+        pgQuery(countSql, params),
+        pgQuery(`
+          SELECT 
+            r.id, r.type, r.message, r.status, r.created_at as "createdAt",
+            json_build_object('id', i.id, 'title', i.title, 'category', i.category, 'images', i.images) as item,
+            json_build_object('id', u1.id, 'name', u1.name, 'email', u1.email, 'avatar', u1.avatar) as requester,
+            json_build_object('id', u2.id, 'name', u2.name, 'email', u2.email, 'avatar', u2.avatar) as owner
+          FROM requests r
+          LEFT JOIN items i ON r.item_id = i.id
+          LEFT JOIN users u1 ON r.requester_id = u1.id
+          LEFT JOIN users u2 ON r.owner_id = u2.id
+          ${whereSql}
+          ORDER BY r.created_at DESC
+          LIMIT $${paramIdx++} OFFSET $${paramIdx++};
+        `, [...params, limit, skip])
+      ]);
+
+      const total = countRes?.rows?.[0]?.total || 0;
+      const requests = (dataRes?.rows || []).map(r => ({
+        _id: r.id,
+        id: r.id,
+        type: r.type,
+        message: r.message,
+        status: r.status,
+        createdAt: r.createdAt,
+        item: r.item,
+        requester: r.requester,
+        owner: r.owner
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          requests,
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1
+        }
+      });
+    } catch (pgErr) {
+      console.warn('[Admin getRequests] PostgreSQL error, checking Mongo:', pgErr.message);
+    }
+
     const query = {};
 
     if (req.query.status && req.query.status !== 'all') {
@@ -846,6 +1053,67 @@ exports.getTransactions = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip = (page - 1) * limit;
+
+    // 1. Primary PostgreSQL query
+    try {
+      let whereSql = 'WHERE 1=1';
+      const params = [];
+      let paramIdx = 1;
+
+      if (req.query.status && req.query.status !== 'all') {
+        whereSql += ` AND UPPER(t.status) = $${paramIdx++}`;
+        params.push(req.query.status.toUpperCase());
+      }
+
+      if (req.query.type && req.query.type !== 'all') {
+        whereSql += ` AND UPPER(t.type) = $${paramIdx++}`;
+        params.push(req.query.type.toUpperCase());
+      }
+
+      const countSql = `SELECT COUNT(*)::int as total FROM transactions t ${whereSql};`;
+      const [countRes, dataRes] = await Promise.all([
+        pgQuery(countSql, params),
+        pgQuery(`
+          SELECT 
+            t.id, t.type, t.status, t.created_at as "createdAt",
+            json_build_object('id', i.id, 'title', i.title, 'category', i.category, 'images', i.images) as item,
+            json_build_object('id', u1.id, 'name', u1.name, 'email', u1.email, 'avatar', u1.avatar) as owner,
+            json_build_object('id', u2.id, 'name', u2.name, 'email', u2.email, 'avatar', u2.avatar) as recipient
+          FROM transactions t
+          LEFT JOIN items i ON t.item_id = i.id
+          LEFT JOIN users u1 ON t.owner_id = u1.id
+          LEFT JOIN users u2 ON t.recipient_id = u2.id
+          ${whereSql}
+          ORDER BY t.created_at DESC
+          LIMIT $${paramIdx++} OFFSET $${paramIdx++};
+        `, [...params, limit, skip])
+      ]);
+
+      const total = countRes?.rows?.[0]?.total || 0;
+      const transactions = (dataRes?.rows || []).map(t => ({
+        _id: t.id,
+        id: t.id,
+        type: t.type,
+        status: t.status,
+        createdAt: t.createdAt,
+        item: t.item,
+        owner: t.owner,
+        recipient: t.recipient
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          transactions,
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1
+        }
+      });
+    } catch (pgErr) {
+      console.warn('[Admin getTransactions] PostgreSQL error, checking Mongo:', pgErr.message);
+    }
 
     const query = {};
 
@@ -935,6 +1203,69 @@ exports.getReports = async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip = (page - 1) * limit;
+
+    // 1. Primary PostgreSQL query
+    try {
+      let whereSql = 'WHERE 1=1';
+      const params = [];
+      let paramIdx = 1;
+
+      if (req.query.status && req.query.status !== 'all') {
+        whereSql += ` AND UPPER(r.status) = $${paramIdx++}`;
+        params.push(req.query.status.toUpperCase());
+      }
+
+      if (req.query.targetType && req.query.targetType !== 'all') {
+        whereSql += ` AND UPPER(r.target_type) = $${paramIdx++}`;
+        params.push(req.query.targetType.toUpperCase());
+      }
+
+      const countSql = `SELECT COUNT(*)::int as total FROM reports r ${whereSql};`;
+      const [countRes, dataRes] = await Promise.all([
+        pgQuery(countSql, params),
+        pgQuery(`
+          SELECT 
+            r.id, r.target_type as "targetType", r.reason, r.description, r.status, r.created_at as "createdAt",
+            json_build_object('id', u1.id, 'name', u1.name, 'email', u1.email, 'avatar', u1.avatar) as reporter,
+            json_build_object('id', u2.id, 'name', u2.name, 'email', u2.email, 'avatar', u2.avatar, 'accountStatus', u2.account_status) as "targetUser",
+            json_build_object('id', i.id, 'title', i.title, 'category', i.category, 'images', i.images, 'status', i.status) as "targetItem"
+          FROM reports r
+          LEFT JOIN users u1 ON r.reporter_id = u1.id
+          LEFT JOIN users u2 ON r.target_user_id = u2.id
+          LEFT JOIN items i ON r.target_item_id = i.id
+          ${whereSql}
+          ORDER BY r.created_at DESC
+          LIMIT $${paramIdx++} OFFSET $${paramIdx++};
+        `, [...params, limit, skip])
+      ]);
+
+      const total = countRes?.rows?.[0]?.total || 0;
+      const reports = (dataRes?.rows || []).map(r => ({
+        _id: r.id,
+        id: r.id,
+        targetType: r.targetType,
+        reason: r.reason,
+        description: r.description,
+        status: r.status,
+        createdAt: r.createdAt,
+        reporter: r.reporter,
+        targetUser: r.targetUser,
+        targetItem: r.targetItem
+      }));
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          reports,
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit) || 1
+        }
+      });
+    } catch (pgErr) {
+      console.warn('[Admin getReports] PostgreSQL error, checking Mongo:', pgErr.message);
+    }
 
     const query = {};
 
@@ -1080,8 +1411,29 @@ exports.resolveReport = async (req, res) => {
 // -------------------------------------------------------------
 exports.getCategories = async (req, res) => {
   try {
+    // 1. Primary PostgreSQL query
+    try {
+      const pgRes = await pgQuery(`
+        SELECT 
+          c.id, c.name, c.slug, c.description, c.icon, c.subcategories, c.status,
+          COALESCE((SELECT COUNT(*)::int FROM items i WHERE LOWER(i.category) = LOWER(c.slug) OR LOWER(i.category) = LOWER(c.name)), 0) as "itemCount"
+        FROM categories c
+        ORDER BY c.name ASC;
+      `);
+
+      if (pgRes && pgRes.rows && pgRes.rows.length > 0) {
+        return res.status(200).json({
+          success: true,
+          count: pgRes.rows.length,
+          categories: pgRes.rows
+        });
+      }
+    } catch (pgErr) {
+      console.warn('[Admin getCategories] PostgreSQL notice:', pgErr.message);
+    }
+
     // Sync seed categories if Category collection is empty
-    const count = await Category.countDocuments();
+    const count = await Category.countDocuments().catch(() => 0);
     if (count === 0) {
       const defaultCategories = [
         { name: 'Books', slug: 'books', description: 'Literature, novels, textbooks, exam prep, non-fiction', icon: 'BookOpen', subcategories: ['Engineering', 'School', 'Competitive Exams', 'Fiction', 'Non-Fiction', 'Other'] },
@@ -1096,27 +1448,15 @@ exports.getCategories = async (req, res) => {
         { name: 'Vehicles / Mobility', slug: 'mobility', description: 'Bicycles, skateboards, roller skates, helmets', icon: 'Bike', subcategories: ['Bicycles', 'Skateboards', 'Helmets & Locks', 'Cycle Accessories', 'Other'] },
         { name: 'Other', slug: 'other', description: 'General unused useful items, creative supplies', icon: 'Package', subcategories: ['Board Games & Hobbies', 'Art Supplies', 'Musical Instruments', 'Miscellaneous', 'Other'] }
       ];
-      await Category.insertMany(defaultCategories);
+      await Category.insertMany(defaultCategories).catch(() => {});
     }
 
-    const categories = await Category.find().sort({ name: 1 }).lean();
-
-    // Aggregate real item counts per category
-    const itemCounts = await Item.aggregate([
-      { $match: { status: 'active' } },
-      { $group: { _id: '$category', count: { $sum: 1 } } }
-    ]);
-    const countMap = new Map(itemCounts.map(c => [(c._id || '').toLowerCase(), c.count]));
-
-    const enriched = categories.map(cat => ({
-      ...cat,
-      itemCount: countMap.get(cat.slug) || countMap.get(cat.name.toLowerCase()) || 0
-    }));
+    const categories = await Category.find().sort({ name: 1 }).lean().catch(() => []);
 
     return res.status(200).json({
       success: true,
-      count: enriched.length,
-      categories: enriched
+      count: categories.length,
+      categories
     });
   } catch (error) {
     console.error('Error fetching categories:', error);

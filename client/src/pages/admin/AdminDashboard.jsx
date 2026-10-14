@@ -23,32 +23,49 @@ import Spinner from '../../components/common/Spinner';
 
 export const AdminDashboard = () => {
   const [range, setRange] = useState('30d');
-  const [data, setData] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [data, setData] = useState(() => {
+    try {
+      const cached = localStorage.getItem('looop_admin_dashboard_cache');
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      return !localStorage.getItem('looop_admin_dashboard_cache');
+    } catch {
+      return true;
+    }
+  });
   const [error, setError] = useState('');
 
-  const fetchDashboard = async (selectedRange) => {
+  const fetchDashboard = async (selectedRange, silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       setError('');
       const res = await adminService.getDashboard(selectedRange);
-      if (res?.success && res?.data) {
-        setData(res.data);
-      } else if (res?.data) {
-        setData(res.data);
-      } else if (res?.metrics) {
-        setData(res);
+      const payload = res?.success && res?.data ? res.data : (res?.data || (res?.metrics ? res : null));
+      if (payload) {
+        setData(payload);
+        try {
+          localStorage.setItem('looop_admin_dashboard_cache', JSON.stringify(payload));
+        } catch {}
       }
     } catch (err) {
       console.error('Failed to load dashboard:', err);
-      setError('Unable to load real dashboard statistics. Please ensure the backend is running.');
+      if (!data) {
+        setError('Unable to load real dashboard statistics. Please ensure the backend is running.');
+      }
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchDashboard(range);
+    // If cached data is present, fetch silently in background without showing loading dots
+    const hasCache = !!data;
+    fetchDashboard(range, hasCache);
   }, [range]);
 
   const metrics = data?.metrics || {};
@@ -244,7 +261,7 @@ export const AdminDashboard = () => {
         <AdminStatCard
           title="Total Users"
           value={metrics.totalUsers}
-          subtitle={`${metrics.activeUsers || 0} active accounts`}
+          subtitle={`${metrics.totalCustomers ?? 0} Customer${(metrics.totalCustomers === 1 ? '' : 's')} • ${metrics.totalAdmins ?? 4} Admins`}
           icon={Users}
           color="var(--color-primary-400)"
           link="/admin/users"

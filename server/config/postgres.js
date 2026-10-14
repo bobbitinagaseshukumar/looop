@@ -44,55 +44,83 @@ const getPoolConfig = () => {
   };
 };
 
+let keepAliveTimer = null;
+
+const startKeepAlive = () => {
+  if (keepAliveTimer) clearInterval(keepAliveTimer);
+  keepAliveTimer = setInterval(async () => {
+    if (pool && isConnected) {
+      try {
+        await pool.query('SELECT 1;');
+      } catch (pingErr) {
+        // silent ping error
+      }
+    }
+  }, 30000);
+  if (keepAliveTimer.unref) keepAliveTimer.unref();
+};
+
+let connectingPromise = null;
+
 /**
  * Initialize PostgreSQL connection pool and create schemas if needed
  */
 const connectPostgres = async () => {
-  try {
-    const config = getPoolConfig();
-    pool = new Pool(config);
+  if (pool && isConnected) return pool;
+  if (connectingPromise) return connectingPromise;
 
-    // Verify connection
-    const client = await pool.connect();
+  connectingPromise = (async () => {
     try {
-      const res = await client.query('SELECT version(), current_database() as db_name, inet_server_addr() as server_ip;');
-      isConnected = true;
-      const row = res.rows[0];
-      dbInfo = {
-        version: row?.version?.split(' ')?.[0] + ' ' + (row?.version?.split(' ')?.[1] || ''),
-        database: row?.db_name,
-        host: config.host || 'connected'
-      };
-      console.log(`[PostgreSQL] Connected successfully to database: ${dbInfo.database}`);
-      console.log(`[PostgreSQL] Engine: ${row?.version?.slice(0, 45)}...`);
-
-      // Initialize tables from initPostgres.sql once on startup
-      if (!tablesInitialized) {
-        const initSqlPath = path.resolve(__dirname, '../scripts/initPostgres.sql');
-        if (fs.existsSync(initSqlPath)) {
-          const sql = fs.readFileSync(initSqlPath, 'utf8');
-          await client.query(sql);
-          console.log('[PostgreSQL] Database tables and indexes verified/initialized.');
-          tablesInitialized = true;
-        }
+      const config = getPoolConfig();
+      if (!pool) {
+        pool = new Pool(config);
+        pool.on('error', (err) => {
+          console.error('[PostgreSQL] Unexpected pool error on idle client:', err.message);
+          isConnected = false;
+        });
       }
-    } finally {
-      client.release();
-    }
 
-    pool.on('error', (err) => {
-      console.error('[PostgreSQL] Unexpected pool error on idle client:', err.message);
+      // Verify connection and pre-warm pool
+      const client = await pool.connect();
+      try {
+        const res = await client.query('SELECT version(), current_database() as db_name, inet_server_addr() as server_ip;');
+        isConnected = true;
+        const row = res.rows[0];
+        dbInfo = {
+          version: row?.version?.split(' ')?.[0] + ' ' + (row?.version?.split(' ')?.[1] || ''),
+          database: row?.db_name,
+          host: config.host || 'connected'
+        };
+        console.log(`[PostgreSQL] Connected successfully to database: ${dbInfo.database}`);
+        console.log(`[PostgreSQL] Engine: ${row?.version?.slice(0, 45)}...`);
+
+        // Initialize tables from initPostgres.sql once on startup
+        if (!tablesInitialized) {
+          const initSqlPath = path.resolve(__dirname, '../scripts/initPostgres.sql');
+          if (fs.existsSync(initSqlPath)) {
+            const sql = fs.readFileSync(initSqlPath, 'utf8');
+            await client.query(sql);
+            console.log('[PostgreSQL] Database tables and indexes verified/initialized.');
+            tablesInitialized = true;
+          }
+        }
+
+        startKeepAlive();
+      } finally {
+        client.release();
+      }
+
+      return pool;
+    } catch (err) {
+      console.error(`[PostgreSQL] Connection failure: ${err.message}`);
       isConnected = false;
-      lastConnectionAttempt = Date.now();
-    });
+      return null;
+    } finally {
+      connectingPromise = null;
+    }
+  })();
 
-    return pool;
-  } catch (err) {
-    console.error(`[PostgreSQL] Connection failure: ${err.message}`);
-    isConnected = false;
-    lastConnectionAttempt = Date.now();
-    return null;
-  }
+  return connectingPromise;
 };
 
 /**
@@ -100,12 +128,8 @@ const connectPostgres = async () => {
  * No in-memory fallback: persistence failures must surface immediately.
  */
 const query = async (text, params = []) => {
-  const now = Date.now();
   if (!pool || !isConnected) {
-    if (now - lastConnectionAttempt > RECONNECT_COOLDOWN_MS) {
-      lastConnectionAttempt = now;
-      await connectPostgres();
-    }
+    await connectPostgres();
   }
 
   if (!pool || !isConnected) {

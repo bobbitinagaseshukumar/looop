@@ -15,6 +15,10 @@ const startServer = async () => {
     console.log('--- Starting Looop Backend Server ---');
     console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 
+    // Connect to PostgreSQL and pre-warm pool
+    const { connectPostgres } = require('./config/postgres');
+    await connectPostgres();
+
     // Connect to MongoDB
     await connectDB();
 

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+mongoose.set('bufferCommands', false);
 const { connectPostgres, closePostgres, getPostgresStatus } = require('./postgres');
 
 let isMongoConnected = false;

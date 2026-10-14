@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { getDBStatus } = require('../config/db');
+const { getPostgresStatus } = require('../config/postgres');
 
 /**
  * @route   GET /api/health
@@ -8,10 +9,11 @@ const { getDBStatus } = require('../config/db');
  * @access  Public
  */
 router.get('/', (req, res) => {
-  const dbStatus = getDBStatus();
+  const mongoStatus = getDBStatus();
+  const pgStatus = getPostgresStatus();
   const uptimeSeconds = Math.floor(process.uptime());
 
-  const isHealthy = dbStatus.isConnected;
+  const isHealthy = pgStatus.isConnected || mongoStatus.isConnected;
 
   res.status(isHealthy ? 200 : 503).json({
     success: true,
@@ -23,7 +25,9 @@ router.get('/', (req, res) => {
       environment: process.env.NODE_ENV || 'development',
       timestamp: new Date().toISOString(),
       uptime: `${uptimeSeconds} seconds`,
-      database: dbStatus,
+      database: pgStatus.isConnected ? 'Connected' : (mongoStatus.isConnected ? 'Connected' : 'Disconnected'),
+      postgres: pgStatus,
+      mongodb: mongoStatus,
       version: '1.0.0'
     }
   });
