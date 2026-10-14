@@ -14,7 +14,8 @@ import {
   Filter,
   CheckCircle,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  Trash2
 } from 'lucide-react';
 import adminService from '../../services/adminService';
 import AdminTable from '../../components/admin/AdminTable';
@@ -94,6 +95,10 @@ export const AdminUsersPage = () => {
   const [statusDialogTarget, setStatusDialogTarget] = useState(null);
   const [statusDialogAction, setStatusDialogAction] = useState('suspended');
   const [isStatusDialogLoading, setIsStatusDialogLoading] = useState(false);
+
+  // Delete User Confirmation State
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [isDeleteLoading, setIsDeleteLoading] = useState(false);
 
   const fetchUsers = useCallback(async (silent = false) => {
     try {
@@ -202,6 +207,43 @@ export const AdminUsersPage = () => {
       setIsStatusDialogLoading(false);
     }
   };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteTarget) return;
+    try {
+      setIsDeleteLoading(true);
+      await adminService.deleteUser(deleteTarget._id || deleteTarget.id);
+      try {
+        const local = JSON.parse(localStorage.getItem('looop_registered_accounts') || '[]');
+        const updated = local.filter((x) => x.email?.toLowerCase() !== deleteTarget.email?.toLowerCase());
+        localStorage.setItem('looop_registered_accounts', JSON.stringify(updated));
+      } catch {}
+      setNotification({
+        type: 'success',
+        message: `User account for ${deleteTarget.name || deleteTarget.email} was removed permanently from the database.`
+      });
+      setDeleteTarget(null);
+      persistentUsers = null;
+      fetchUsers(false);
+    } catch (err) {
+      console.error('Failed to delete user:', err);
+      setNotification({
+        type: 'error',
+        message: err.message || 'Failed to delete user account.'
+      });
+    } finally {
+      setIsDeleteLoading(false);
+    }
+  };
+
+  // Auto-refresh when new user registers anywhere in the app
+  useEffect(() => {
+    const handleUsersUpdated = () => {
+      fetchUsers(false);
+    };
+    window.addEventListener('looop_users_updated', handleUsersUpdated);
+    return () => window.removeEventListener('looop_users_updated', handleUsersUpdated);
+  }, [fetchUsers]);
 
   const columns = [
     {
@@ -411,6 +453,30 @@ export const AdminUsersPage = () => {
             >
               <UserX size={13} />
               <span>Suspend</span>
+            </button>
+          )}
+
+          {!['looop.support@gmail.com', 'maheshkuppala321@gmail.com', 'admin@looop.community'].includes(u.email?.toLowerCase()) && (
+            <button
+              type="button"
+              title="Delete user account permanently"
+              onClick={() => setDeleteTarget(u)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                padding: '6px 10px',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: 'var(--radius-xs)',
+                color: '#f87171',
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              <Trash2 size={13} />
+              <span>Delete</span>
             </button>
           )}
         </div>
@@ -844,6 +910,18 @@ export const AdminUsersPage = () => {
         isLoading={isStatusDialogLoading}
         onConfirm={handleConfirmStatusChange}
         onCancel={() => setStatusDialogTarget(null)}
+      />
+
+      {/* Confirmation Dialog for Permanent User Deletion */}
+      <ConfirmDialog
+        isOpen={Boolean(deleteTarget)}
+        title={`Permanently Delete ${deleteTarget?.name || deleteTarget?.email}?`}
+        message={`Are you sure you want to permanently delete ${deleteTarget?.email} from the database? Once deleted, this email address will be immediately freed up and eligible for new registration.`}
+        confirmLabel="Delete User Permanently"
+        confirmVariant="danger"
+        isLoading={isDeleteLoading}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeleteTarget(null)}
       />
 
       <style>{`

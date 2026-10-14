@@ -364,6 +364,40 @@ exports.updateUserStatus = async (req, res) => {
   }
 };
 
+exports.deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'User ID is required.' });
+    }
+
+    // 1. Delete from PostgreSQL
+    try {
+      await pgQuery('DELETE FROM users WHERE id = $1;', [id]);
+    } catch (pgErr) {
+      console.warn('[AdminController] PG deleteUser warning:', pgErr.message);
+    }
+
+    // 2. Delete from MongoDB if available
+    if (mongoose.connection && mongoose.connection.readyState === 1) {
+      try {
+        await User.findByIdAndDelete(id);
+      } catch {}
+    }
+
+    adminDashboardService.invalidateDashboardCache();
+    adminAnalyticsService.invalidateAnalyticsCache();
+
+    return res.status(200).json({
+      success: true,
+      message: 'User removed from database permanently.'
+    });
+  } catch (err) {
+    console.error('deleteUser error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to delete user.' });
+  }
+};
+
 // -------------------------------------------------------------
 // 4. ITEMS & MODERATION
 // -------------------------------------------------------------

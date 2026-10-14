@@ -17,6 +17,7 @@ router.get('/analytics', adminController.getAnalytics);
 router.get('/users', adminController.getUsers);
 router.get('/users/:id', adminController.getUserDetails);
 router.patch('/users/:id/status', adminController.updateUserStatus);
+router.delete('/users/:id', adminController.deleteUser);
 
 // 4. Listing Moderation
 router.get('/items', adminController.getItems);

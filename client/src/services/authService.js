@@ -450,7 +450,8 @@ export const authService = {
   },
 
   /**
-   * Check if an email address is already owned by an existing user in Neon DB, Mongo, or Local Storage
+   * Check if an email address is already owned by an existing user in Neon DB or Mongo
+   * Strictly checks the actual database - if removed from database, allows verification!
    * @param {string} email
    * @returns {Promise<{ exists: boolean, user?: Object, message?: string }>}
    */
@@ -458,39 +459,36 @@ export const authService = {
     const cleanEmail = (email || '').trim().toLowerCase();
     if (!cleanEmail) return { exists: false };
 
-    // 1. Check Super Admins & Known Accounts
-    const superAdmins = ['looop.support@gmail.com', 'maheshkuppala321@gmail.com', 'admin@looop.community'];
-    if (superAdmins.includes(cleanEmail)) {
-      return { exists: true, message: 'An account with this email address already exists.' };
-    }
-
-    // 2. Check Neon PostgreSQL Database
+    // 1. Direct query to live Neon PostgreSQL Cloud Database (THE TRUE SOURCE OF TRUTH)
     try {
       const dbUser = await neonDb.getUserByEmail(cleanEmail);
       if (dbUser) {
-        return { exists: true, user: dbUser, message: 'An account with this email address already exists in database.' };
+        return { exists: true, user: dbUser, message: 'An account with this email address already exists in the database.' };
       }
     } catch (pgErr) {
       console.warn('[authService] Neon check warning:', pgErr.message);
     }
 
-    // 3. Check Backend API
+    // 2. Query Backend API if connected
     try {
       const res = await api.post('/auth/check-email', { email: cleanEmail });
       if (res.data && res.data.exists) {
-        return { exists: true, message: res.data.message || 'An account with this email address already exists.' };
+        return { exists: true, message: res.data.message || 'An account with this email address already exists in the database.' };
       }
     } catch (apiErr) {
-      // Ignore API check errors for resilient offline behavior
+      // Backend check error / offline
     }
 
-    // 4. Check Local Storage Registered Users
-    const localUsers = getLocalUsers();
-    const localMatch = localUsers.find((u) => u.email.toLowerCase() === cleanEmail);
-    if (localMatch) {
-      return { exists: true, user: localMatch, message: 'An account with this email address already exists.' };
-    }
+    // 3. Purge any stale local storage cache for this email so removed accounts NEVER block verification
+    try {
+      const localUsers = getLocalUsers();
+      const filtered = localUsers.filter((u) => u.email.toLowerCase() !== cleanEmail);
+      if (filtered.length !== localUsers.length) {
+        localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(filtered));
+      }
+    } catch {}
 
+    // Strictly NOT in database -> Email is fully available for verification & registration!
     return { exists: false };
   },
 
@@ -592,6 +590,16 @@ export const authService = {
 
     const finalUser = pgUser ? { ...newUser, ...pgUser } : newUser;
     saveLocalUser(finalUser);
+
+    // Invalidate Admin Users cache so newly registered customer appears immediately in Admin Panel
+    try {
+      localStorage.removeItem('looop_admin_users_cache');
+      localStorage.removeItem('looop_admin_users_total');
+      localStorage.removeItem('looop_admin_users_counts');
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('looop_users_updated'));
+      }
+    } catch {}
 
     // 2. Try secondary API endpoint if active, but guarantee registration success via Neon DB
     try {

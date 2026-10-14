@@ -9,19 +9,35 @@ const NEON_CONN_STRING =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_NEON_DATABASE_URL) ||
   `postgresql://${DEFAULT_AUTH}@ep-small-wind-b4hjagr6-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require`;
 
+function escapeSql(val) {
+  if (val === null || val === undefined) return 'NULL';
+  if (typeof val === 'number') return String(val);
+  if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+  return `'${String(val).replace(/'/g, "''")}'`;
+}
+
+function interpolateSql(sql, params = []) {
+  if (!params || params.length === 0) return sql;
+  return sql.replace(/\$(\d+)/g, (match, idx) => {
+    const i = parseInt(idx, 10) - 1;
+    return i >= 0 && i < params.length ? escapeSql(params[i]) : match;
+  });
+}
+
 export const neonDb = {
   /**
    * Execute parameterized query on Neon PostgreSQL
    */
   query: async (sqlText, params = []) => {
     try {
+      const finalSql = interpolateSql(sqlText, params);
       const response = await fetch(NEON_SQL_ENDPOINT, {
         method: 'POST',
         headers: {
           'Neon-Connection-String': NEON_CONN_STRING,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ query: sqlText, params })
+        body: JSON.stringify({ query: finalSql })
       });
 
       if (!response.ok) {
@@ -35,6 +51,24 @@ export const neonDb = {
     } catch (err) {
       console.warn('[Neon Network Exception]', err.message);
       return { rows: [], error: err.message };
+    }
+  },
+
+  /**
+   * Delete user from Neon PostgreSQL by id or email
+   */
+  deleteUser: async (identifier) => {
+    if (!identifier) return false;
+    const isEmail = String(identifier).includes('@');
+    const sql = isEmail
+      ? 'DELETE FROM users WHERE LOWER(email) = LOWER($1) RETURNING id, email;'
+      : 'DELETE FROM users WHERE id = $1 RETURNING id, email;';
+    try {
+      const res = await neonDb.query(sql, [String(identifier).trim()]);
+      return !!(res.rows && res.rows.length > 0);
+    } catch (err) {
+      console.warn('[Neon DB Delete User Error]', err.message);
+      return false;
     }
   },
 

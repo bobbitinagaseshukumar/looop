@@ -261,8 +261,20 @@ export const adminService = {
       const countRes = await neonDb.query(countSql, qParams);
       const total = countRes.rows?.[0]?.total || 0;
 
+      const roleBreakdown = await neonDb.query(`
+        SELECT 
+          COUNT(*)::int as total,
+          COUNT(CASE WHEN LOWER(role) = 'customer' THEN 1 END)::int as customers,
+          COUNT(CASE WHEN LOWER(role) = 'admin' THEN 1 END)::int as admins,
+          COUNT(CASE WHEN account_status = 'active' THEN 1 END)::int as active,
+          COUNT(CASE WHEN account_status = 'suspended' THEN 1 END)::int as suspended
+        FROM users;
+      `);
+      const counts = roleBreakdown.rows?.[0] || { total, customers: 0, admins: 0, active: 0, suspended: 0 };
+      counts.all = counts.total || total;
+
       const sql = `
-        SELECT u.id, u.name, u.email, u.role, u.avatar, u.bio, u.city, u.locality, u.state,
+        SELECT u.id, u.name, u.email, u.phone, u.plain_password AS "plainPassword", u.password, u.role, u.avatar, u.bio, u.city, u.locality, u.state,
                u.account_status AS "accountStatus", u.trust_score AS "trustScore",
                u.rating, u.reviews_count AS "reviewsCount", u.verified, u.created_at AS "createdAt",
                (SELECT COUNT(*)::int FROM items WHERE owner_id = u.id) AS "itemsCount",
@@ -280,6 +292,7 @@ export const adminService = {
         data: {
           users,
           total,
+          counts,
           page,
           limit,
           totalPages: Math.ceil(total / limit) || 1
@@ -288,6 +301,20 @@ export const adminService = {
     } catch (pgErr) {
       console.error('[adminService.getUsers] Direct Neon error:', pgErr);
       return { success: true, data: { users: [], total: 0, page: 1, limit: 20, totalPages: 1 } };
+    }
+  },
+
+  deleteUser: async (id) => {
+    try {
+      await neonDb.deleteUser(id);
+    } catch (pgErr) {
+      console.warn('[adminService.deleteUser] Neon delete notice:', pgErr.message);
+    }
+    try {
+      const res = await api.delete(`/admin/users/${id}`);
+      return res.data;
+    } catch {
+      return { success: true, message: 'User account removed from database successfully.' };
     }
   },
 

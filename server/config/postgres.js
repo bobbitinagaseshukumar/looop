@@ -123,17 +123,33 @@ const connectPostgres = async () => {
   return connectingPromise;
 };
 
+function escapeSql(val) {
+  if (val === null || val === undefined) return 'NULL';
+  if (typeof val === 'number') return String(val);
+  if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+  return `'${String(val).replace(/'/g, "''")}'`;
+}
+
+function interpolateSql(sql, params = []) {
+  if (!params || params.length === 0) return sql;
+  return sql.replace(/\$(\d+)/g, (match, idx) => {
+    const i = parseInt(idx, 10) - 1;
+    return i >= 0 && i < params.length ? escapeSql(params[i]) : match;
+  });
+}
+
 const queryNeonHttp = async (text, params = []) => {
   const NEON_SQL_ENDPOINT = 'https://ep-small-wind-b4hjagr6.c-6.us-east-2.aws.neon.tech/sql';
   const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URI || process.env.POSTGRESQL_URL || DEFAULT_NEON_URL;
   try {
+    const finalSql = interpolateSql(text, params);
     const res = await fetch(NEON_SQL_ENDPOINT, {
       method: 'POST',
       headers: {
         'Neon-Connection-String': connectionString,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({ query: text, params })
+      body: JSON.stringify({ query: finalSql })
     });
     if (!res.ok) {
       const errText = await res.text();
