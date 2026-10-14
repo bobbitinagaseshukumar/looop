@@ -7,6 +7,7 @@ const { query: pgQuery } = require('../config/postgres');
 const { invalidateDashboardCache } = require('../services/adminDashboardService');
 const { invalidateAnalyticsCache } = require('../services/adminAnalyticsService');
 const { clearAdminItemsCache } = require('./adminController');
+const emailService = require('../services/emailService');
 
 /**
  * GET /api/items/upload-rules
@@ -417,7 +418,40 @@ exports.createItem = async (req, res) => {
     invalidateDashboardCache();
     invalidateAnalyticsCache();
 
-    // 9. Record item creation event in Neon admin audit logs
+    // 9. Send official email notification to customer that their product is published & live
+    if (userEmail) {
+      const publicItemUrl = `${process.env.CLIENT_URL || 'http://localhost:3000'}/items/${pgSavedItem ? pgSavedItem.id : neonItemId}`;
+      emailService.sendItemSharedEmail({
+        toEmail: userEmail,
+        recipientName: userName || 'LOOOP Member',
+        recipientUserId: resolvedOwnerId,
+        itemTitle: title.trim(),
+        condition: normalizedCondition,
+        sharingType: normalizedSharingType,
+        location: locationObj.city || 'Bengaluru',
+        itemUrl: publicItemUrl
+      }).then(() => {
+        console.log(`[EmailService] Product upload confirmation email successfully dispatched to ${userEmail} for item "${title.trim()}"`);
+      }).catch(err => {
+        console.warn('[itemController] Error sending product upload confirmation email:', err.message);
+      });
+    }
+
+    // In-app notification for the customer
+    try {
+      await pgQuery(
+        `INSERT INTO notifications (id, recipient_id, type, category, title, message, link, is_read, created_at, updated_at)
+         VALUES ($1, $2, 'ITEM_PUBLISHED', 'items', 'Listing Published 🎉', $3, $4, false, NOW(), NOW());`,
+        [
+          `notif-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          resolvedOwnerId,
+          `"${title.trim()}" is now published and discoverable by community members on LOOOP.`,
+          `/items/${pgSavedItem ? pgSavedItem.id : neonItemId}`
+        ]
+      );
+    } catch {}
+
+    // 10. Record item creation event in Neon admin audit logs
     try {
       await pgQuery(
         `INSERT INTO admin_audit_logs (id, admin_id, action, target_type, target_id, target_title, metadata, created_at, updated_at)

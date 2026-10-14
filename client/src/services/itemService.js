@@ -27,6 +27,8 @@ export function saveLocalSharedItem(item) {
 }
 
 /**
+ * Normalize image URL for browser display
+ */
 export function normalizeImageUrl(img) {
   if (!img) return 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
   const urlStr = typeof img === 'string' ? img : (img.url || '');

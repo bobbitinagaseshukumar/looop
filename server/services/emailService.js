@@ -1,9 +1,15 @@
 const BrevoProvider = require('./email/BrevoProvider');
 const MockProvider = require('./email/MockProvider');
+const NodemailerProvider = require('./email/NodemailerProvider');
 const { buildLooopEmailHtml, looopEmailTemplates } = require('./emailTemplateService');
 const { query } = require('../config/postgres');
 
-let activeProvider = new BrevoProvider();
+let activeProvider;
+if (process.env.BREVO_API_KEY && !process.env.BREVO_API_KEY.includes('your_brevo') && process.env.EMAIL_PROVIDER === 'brevo') {
+  activeProvider = new BrevoProvider();
+} else {
+  activeProvider = new NodemailerProvider();
+}
 
 function setProvider(providerInstance) {
   activeProvider = providerInstance;
@@ -436,14 +442,15 @@ async function sendWelcomeEmail({ toEmail, recipientName, recipientUserId }) {
 }
 
 async function sendItemSharedEmail({ toEmail, recipientName, recipientUserId, itemTitle, condition, sharingType, location, itemUrl }) {
+  console.log(`[EmailService] Dispatching product upload confirmation email to: ${toEmail} for item: "${itemTitle}"`);
   return dispatchEmail({
     eventType: 'ITEM_CREATED',
     recipientEmail: toEmail,
-    recipientName,
+    recipientName: recipientName || 'LOOOP Member',
     recipientUserId,
     templateKey: 'productShared',
-    templateData: { item: itemTitle, condition, type: sharingType, location, itemUrl },
-    isEssential: false,
+    templateData: { name: recipientName, item: itemTitle, condition, type: sharingType, location, itemUrl },
+    isEssential: true,
     category: 'items'
   });
 }

@@ -53,7 +53,7 @@ export const LandingPage = () => {
     let isMounted = true;
     const fetchItems = async () => {
       try {
-        const res = await itemService.getItems({ limit: 12 });
+        const res = await itemService.getItems({ limit: 24 });
         if (isMounted && res?.items) {
           setRealItems(res.items);
           const metrics = getLiveImpactMetrics();
@@ -86,8 +86,12 @@ export const LandingPage = () => {
   };
 
   const filteredItems = selectedCategory === 'all'
-    ? realItems.slice(0, 6)
-    : realItems.filter(item => item.category === selectedCategory || item.category?.toLowerCase() === selectedCategory.toLowerCase()).slice(0, 6);
+    ? realItems
+    : realItems.filter(item => {
+        const cat = (item.category || '').toLowerCase();
+        const sel = selectedCategory.toLowerCase();
+        return cat === sel || cat.includes(sel) || sel.includes(cat);
+      });
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', width: '100%', overflowX: 'hidden' }}>
@@ -407,6 +411,219 @@ export const LandingPage = () => {
           2. AMAZON-STYLE AUTO-MOVING LISTED ITEMS CAROUSEL
           ========================================================================= */}
       <AmazonItemCarousel items={realItems} />
+
+      {/* =========================================================================
+          2.5. RECENTLY SHARED COMMUNITY PRODUCTS (UNIVERSAL MOBILE & DESKTOP VISIBILITY)
+          ========================================================================= */}
+      <section
+        style={{
+          padding: '4.5rem 0',
+          backgroundColor: '#ffffff',
+          borderBottom: '1px solid var(--color-slate-100)'
+        }}
+        aria-label="Recently Shared Items"
+      >
+        <div className="container">
+          {/* Header */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-end',
+              justifyContent: 'space-between',
+              marginBottom: '2rem',
+              flexWrap: 'wrap',
+              gap: '1.25rem'
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '4px 12px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                  borderRadius: 'var(--radius-full)',
+                  color: 'var(--color-primary-700)',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  marginBottom: '0.5rem'
+                }}
+              >
+                <Sparkles size={14} />
+                <span>Live Community Feed</span>
+              </div>
+              <h2
+                style={{
+                  fontSize: 'clamp(1.8rem, 3.5vw, 2.4rem)',
+                  fontWeight: 800,
+                  letterSpacing: '-0.025em',
+                  color: 'var(--color-slate-900)'
+                }}
+              >
+                Recently Shared by Neighbors
+              </h2>
+              <p style={{ color: 'var(--color-slate-600)', fontSize: '1rem', marginTop: '0.35rem' }}>
+                Every shared item is saved in real time and discoverable on all mobile phones & desktops.
+              </p>
+            </div>
+
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <Button
+                variant="outline"
+                size="sm"
+                iconLeft={Gift}
+                onClick={handleShareClick}
+                style={{
+                  borderColor: 'var(--color-primary-500)',
+                  color: 'var(--color-primary-700)',
+                  fontWeight: 600
+                }}
+              >
+                Share an Item
+              </Button>
+              <Link to="/browse" style={{ textDecoration: 'none' }}>
+                <Button variant="primary" size="sm" iconRight={ArrowRight}>
+                  View All ({realItems.length})
+                </Button>
+              </Link>
+            </div>
+          </div>
+
+          {/* Category Filter Pills */}
+          <div
+            style={{
+              display: 'flex',
+              gap: '0.5rem',
+              overflowX: 'auto',
+              paddingBottom: '0.75rem',
+              marginBottom: '2rem',
+              WebkitOverflowScrolling: 'touch'
+            }}
+            className="category-filter-scroll"
+          >
+            {[
+              { id: 'all', label: `✨ All Items (${realItems.length})` },
+              { id: 'books', label: '📚 Books & Notes' },
+              { id: 'electronics', label: '💻 Electronics' },
+              { id: 'study', label: '✏️ Study & Office' },
+              { id: 'tools', label: '🔧 Tools & DIY' },
+              { id: 'sports', label: '⚽ Sports & Hobbies' },
+              { id: 'fashion', label: '👕 Clothing' },
+              { id: 'other', label: '📦 Other' }
+            ].map((cat) => {
+              const isSelected = selectedCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  type="button"
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: 'var(--radius-full)',
+                    fontSize: '0.85rem',
+                    fontWeight: isSelected ? 700 : 500,
+                    whiteSpace: 'nowrap',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    border: isSelected ? '1.5px solid var(--color-primary-600)' : '1px solid var(--color-slate-200)',
+                    backgroundColor: isSelected ? 'var(--color-primary-50)' : '#ffffff',
+                    color: isSelected ? 'var(--color-primary-800)' : 'var(--color-slate-700)',
+                    boxShadow: isSelected ? '0 2px 8px rgba(16, 185, 129, 0.15)' : 'none'
+                  }}
+                >
+                  {cat.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Products Grid - 100% Mobile & Desktop Responsive */}
+          {filteredItems.length > 0 ? (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))',
+                gap: '1.5rem',
+                width: '100%'
+              }}
+            >
+              {filteredItems.map((item) => (
+                <ItemCard key={item.id || item._id} item={item} />
+              ))}
+            </div>
+          ) : (
+            <div
+              style={{
+                textAlign: 'center',
+                padding: '3.5rem 1.5rem',
+                backgroundColor: 'var(--color-slate-50)',
+                borderRadius: 'var(--radius-xl)',
+                border: '1px dashed var(--color-slate-200)'
+              }}
+            >
+              <Package size={40} color="var(--color-slate-400)" style={{ margin: '0 auto 1rem auto' }} />
+              <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--color-slate-800)', marginBottom: '0.5rem' }}>
+                No items in this category yet
+              </h3>
+              <p style={{ color: 'var(--color-slate-500)', fontSize: '0.95rem', maxWidth: '420px', margin: '0 auto 1.5rem auto' }}>
+                Have an unused item at home or work? Share it with your community in just two minutes.
+              </p>
+              <Button variant="primary" size="md" iconLeft={Gift} onClick={handleShareClick}>
+                Be the first to share in this category
+              </Button>
+            </div>
+          )}
+
+          {/* Bottom Explore Banner */}
+          <div
+            style={{
+              marginTop: '3rem',
+              padding: '1.5rem 2rem',
+              backgroundColor: '#f0fdf4',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px solid #bbf7d0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '1rem'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '50%',
+                  backgroundColor: '#dcfce7',
+                  color: '#16a34a',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <Users size={20} />
+              </div>
+              <div>
+                <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#166534' }}>
+                  Looking for something specific?
+                </h4>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: '#15803d' }}>
+                  Explore the full catalog with custom filters, search by keywords, condition, and distance.
+                </p>
+              </div>
+            </div>
+
+            <Link to="/browse" style={{ textDecoration: 'none' }}>
+              <Button variant="outline" size="sm" iconRight={ArrowRight} style={{ backgroundColor: '#ffffff', borderColor: '#86efac', color: '#166534', fontWeight: 700 }}>
+                Open Search & Filters
+              </Button>
+            </Link>
+          </div>
+        </div>
+      </section>
 
       {/* =========================================================================
           3. CUSTOMER FEEDBACKS & COMMUNITY REVIEWS SECTION
