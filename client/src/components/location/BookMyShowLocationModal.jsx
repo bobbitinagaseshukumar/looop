@@ -2,18 +2,10 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, MapPin, Navigation, X, Building2, AlertCircle, RefreshCw, CheckCircle2 } from 'lucide-react';
 import { useLocationContext } from '../../context/LocationContext';
 import { loadGoogleMaps, getGoogleMapsApiKey } from '../../services/googleMapsLoader';
+import { searchIndianCities, POPULAR_LOCATIONS } from '../../data/indianCities';
 import api from '../../services/api';
 
-const DEFAULT_POPULAR = [
-  { name: 'Guntur', city: 'Guntur', state: 'Andhra Pradesh', latitude: 16.3067, longitude: 80.4365 },
-  { name: 'Vijayawada', city: 'Vijayawada', state: 'Andhra Pradesh', latitude: 16.5062, longitude: 80.6480 },
-  { name: 'Hyderabad', city: 'Hyderabad', state: 'Telangana', latitude: 17.3850, longitude: 78.4867 },
-  { name: 'Bengaluru', city: 'Bengaluru', state: 'Karnataka', latitude: 12.9716, longitude: 77.5946 },
-  { name: 'Chennai', city: 'Chennai', state: 'Tamil Nadu', latitude: 13.0827, longitude: 80.2707 },
-  { name: 'Mumbai', city: 'Mumbai', state: 'Maharashtra', latitude: 19.0760, longitude: 72.8777 },
-  { name: 'Delhi', city: 'Delhi', state: 'Delhi', latitude: 28.6139, longitude: 77.2090 },
-  { name: 'Visakhapatnam', city: 'Visakhapatnam', state: 'Andhra Pradesh', latitude: 17.6868, longitude: 83.2185 }
-];
+const DEFAULT_POPULAR = POPULAR_LOCATIONS.slice(0, 16);
 
 export const BookMyShowLocationModal = ({ isOpen, onClose }) => {
   const {
@@ -85,7 +77,7 @@ export const BookMyShowLocationModal = ({ isOpen, onClose }) => {
     };
   }, [isOpen]);
 
-  // Execute Real Google Places Autocomplete Search with Debounce & Stale Request Cancellation
+  // Execute Real Places & Cities Autocomplete Search (Instant 0ms Local + Live Geocoder)
   useEffect(() => {
     const q = searchQuery.trim();
 
@@ -97,23 +89,43 @@ export const BookMyShowLocationModal = ({ isOpen, onClose }) => {
       return;
     }
 
-    setSearchStatus('searching');
-    setStatusMessage('Searching locations...');
-    setSelectedIndex(-1);
-
     const requestId = ++lastRequestIdRef.current;
 
+    // 1. Instant 0-second matching against rich Indian Cities directory
+    const instantMatches = searchIndianCities(q, 12).map((c) => ({
+      placeId: `in_${c.name.toLowerCase().replace(/[^a-z0-9]/g, '_')}_${c.state.toLowerCase().replace(/[^a-z0-9]/g, '_')}`,
+      name: c.name,
+      mainText: c.name,
+      secondaryText: c.name !== c.city ? `${c.city}, ${c.state}, India` : `${c.state}, India`,
+      city: c.city,
+      district: c.district || c.city,
+      locality: c.type === 'LOCALITY' || c.type === 'LANDMARK' ? c.name : c.city,
+      state: c.state,
+      country: 'India',
+      latitude: c.latitude,
+      longitude: c.longitude,
+      type: c.type || 'CITY',
+      source: 'INDIAN_DIRECTORY'
+    }));
+
+    if (instantMatches.length > 0) {
+      setSearchResults(instantMatches);
+      setSearchStatus('results');
+    } else {
+      setSearchStatus('searching');
+      setStatusMessage('Searching locations...');
+    }
+    setSelectedIndex(-1);
+
+    // 2. Fetch server & live geocoder in parallel with 150ms debounce
     const timer = setTimeout(async () => {
-      // 1. Primary: Use Google Places AutocompleteService if available
+      // If Google Places AutocompleteService is active, query it
       if (autocompleteServiceRef.current && window.google?.maps?.places) {
         try {
           autocompleteServiceRef.current.getPlacePredictions(
-            {
-              input: q
-            },
+            { input: q },
             (predictions, status) => {
-              if (requestId !== lastRequestIdRef.current) return; // Ignore stale responses
-
+              if (requestId !== lastRequestIdRef.current) return;
               if (status === window.google.maps.places.PlacesServiceStatus.OK && predictions && predictions.length > 0) {
                 const results = predictions.map((p) => ({
                   placeId: p.place_id,
@@ -123,114 +135,103 @@ export const BookMyShowLocationModal = ({ isOpen, onClose }) => {
                   formattedAddress: p.description,
                   source: 'GOOGLE_PLACES'
                 }));
-                setSearchResults(results);
+                // Merge instant + Google Places
+                const existing = new Set(results.map((r) => r.name.toLowerCase()));
+                const combined = [...results];
+                for (const m of instantMatches) {
+                  if (!existing.has(m.name.toLowerCase())) {
+                    existing.add(m.name.toLowerCase());
+                    combined.push(m);
+                  }
+                }
+                setSearchResults(combined);
                 setSearchStatus('results');
-              } else {
-                console.warn('[LOOOP Places] Search status:', status);
-                fallbackSearch(q, requestId);
+                return;
               }
+              fallbackSearch(q, requestId, instantMatches);
             }
           );
           return;
-        } catch (err) {
-          console.warn('[LOOOP Places] Autocomplete exception:', err);
-        }
+        } catch (err) {}
       }
 
-      // 2. Secondary: Fallback to Geocoding / Backend Search if Places SDK pending
-      fallbackSearch(q, requestId);
-    }, 300); // 300ms Debounce
+      fallbackSearch(q, requestId, instantMatches);
+    }, 150);
 
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  // Fallback search using Backend API & Geocoder if Places Autocomplete returns no results or fails
-  const fallbackSearch = async (q, requestId) => {
+  // Fallback search using Backend API & Geocoder
+  const fallbackSearch = async (q, requestId, initialMatches = []) => {
     try {
-      // First try Backend API search (pre-seeded cities + Nominatim)
-      try {
-        const res = await api.get(`/location/search?q=${encodeURIComponent(q)}`);
-        if (requestId !== lastRequestIdRef.current) return;
+      const res = await api.get(`/location/search?q=${encodeURIComponent(q)}`);
+      if (requestId !== lastRequestIdRef.current) return;
 
-        if (res.data?.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
-          const parsed = res.data.data.map((item) => ({
-            placeId: item._id || item.id,
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        const backendItems = res.data.data;
+        const qLow = q.toLowerCase();
+
+        // Verify that backend returned genuine matches for the query
+        const relevant = backendItems.filter((item) => {
+          const name = (item.name || item.city || '').toLowerCase();
+          const dist = (item.district || '').toLowerCase();
+          const st = (item.state || '').toLowerCase();
+          return name.includes(qLow) || qLow.includes(name) || dist.includes(qLow) || st.includes(qLow);
+        });
+
+        if (relevant.length > 0 || initialMatches.length > 0) {
+          const parsed = relevant.map((item) => ({
+            placeId: item.placeId || item._id || item.id,
             name: item.name || item.city,
-            mainText: item.name || item.city,
-            secondaryText: [item.city !== item.name ? item.city : '', item.state, item.country].filter(Boolean).join(', '),
+            mainText: item.mainText || item.name || item.city,
+            secondaryText: item.secondaryText || [item.city !== item.name ? item.city : '', item.state, item.country || 'India'].filter(Boolean).join(', '),
             city: item.city || item.name,
             locality: item.locality || item.name,
+            district: item.district || '',
             state: item.state || '',
+            country: item.country || 'India',
             latitude: item.latitude,
             longitude: item.longitude,
-            source: 'BACKEND'
+            type: item.type || 'CITY',
+            source: item.source || 'BACKEND'
           }));
-          setSearchResults(parsed);
+
+          // Merge initial matches + parsed
+          const seen = new Set();
+          const merged = [];
+          for (const item of [...initialMatches, ...parsed]) {
+            const key = `${item.name.toLowerCase()}_${(item.state || '').toLowerCase()}`;
+            if (!seen.has(key)) {
+              seen.add(key);
+              merged.push(item);
+            }
+          }
+
+          setSearchResults(merged);
           setSearchStatus('results');
           return;
         }
-      } catch (backendErr) {
-        console.warn('[LOOOP Search] Backend fallback notice:', backendErr);
       }
 
-      // Second try Google Geocoder
-      if (geocoderRef.current) {
-        geocoderRef.current.geocode({ address: q }, (results, status) => {
-          if (requestId !== lastRequestIdRef.current) return;
-
-          if (status === 'OK' && results && results.length > 0) {
-            const parsed = results.slice(0, 10).map((r) => {
-              let city = '';
-              let locality = '';
-              let state = '';
-              let country = 'India';
-
-              (r.address_components || []).forEach((comp) => {
-                const types = comp.types || [];
-                if (types.includes('locality')) city = comp.long_name;
-                else if (types.includes('sublocality') || types.includes('neighborhood')) locality = comp.long_name;
-                else if (types.includes('administrative_area_level_1')) state = comp.long_name;
-                else if (types.includes('country')) country = comp.long_name;
-              });
-
-              const name = locality || city || r.formatted_address.split(',')[0];
-
-              return {
-                placeId: r.place_id,
-                name,
-                mainText: name,
-                secondaryText: [city !== name ? city : '', state, country].filter(Boolean).join(', '),
-                city: city || name,
-                locality: locality || name,
-                state,
-                country,
-                latitude: r.geometry.location.lat(),
-                longitude: r.geometry.location.lng(),
-                formattedAddress: r.formatted_address,
-                source: 'GOOGLE_GEOCODER'
-              };
-            });
-
-            setSearchResults(parsed);
-            setSearchStatus('results');
-            return;
-          }
-
-          setSearchResults([]);
-          setSearchStatus('no_results');
-          setStatusMessage(`No locations found for "${q}".`);
-        });
+      if (initialMatches.length > 0) {
+        setSearchResults(initialMatches);
+        setSearchStatus('results');
         return;
       }
 
       setSearchResults([]);
       setSearchStatus('no_results');
-      setStatusMessage(`No locations found for "${q}".`);
+      setStatusMessage(`No locations found matching "${q}".`);
     } catch (err) {
       if (requestId !== lastRequestIdRef.current) return;
-      setSearchResults([]);
-      setSearchStatus('error');
-      setStatusMessage('Location search is currently unavailable.');
+      if (initialMatches.length > 0) {
+        setSearchResults(initialMatches);
+        setSearchStatus('results');
+      } else {
+        setSearchResults([]);
+        setSearchStatus('no_results');
+        setStatusMessage(`No locations found matching "${q}".`);
+      }
     }
   };
 
@@ -562,25 +563,33 @@ export const BookMyShowLocationModal = ({ isOpen, onClose }) => {
             </div>
           )}
 
-          {/* Real Google Places Search Results */}
+          {/* Real Google Maps & BookMyShow Places Search Results */}
           {searchQuery ? (
             <div>
-              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                {searchStatus === 'searching' && <RefreshCw size={13} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />}
-                <span>
-                  {searchStatus === 'searching' ? 'Searching locations...' : `Google Places Results for "${searchQuery}"`}
-                </span>
+              <div style={{ fontSize: '0.75rem', fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  {searchStatus === 'searching' && searchResults.length === 0 && <RefreshCw size={13} className="animate-spin" style={{ animation: 'spin 1s linear infinite', color: '#10b981' }} />}
+                  <span>
+                    {searchStatus === 'searching' && searchResults.length === 0 ? 'Searching locations...' : `Places matching "${searchQuery}"`}
+                  </span>
+                </div>
+                {searchResults.length > 0 && (
+                  <span style={{ backgroundColor: '#f1f5f9', color: '#475569', padding: '2px 8px', borderRadius: '10px', fontSize: '0.7rem' }}>
+                    {searchResults.length} {searchResults.length === 1 ? 'place' : 'places'}
+                  </span>
+                )}
               </div>
 
-              {searchStatus === 'searching' ? (
-                <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '0.875rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+              {searchStatus === 'searching' && searchResults.length === 0 ? (
+                <div style={{ padding: '28px', textAlign: 'center', color: '#64748b', fontSize: '0.875rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                   <RefreshCw size={18} className="animate-spin" style={{ animation: 'spin 1s linear infinite', color: '#10b981' }} />
-                  <span>Searching Google Places...</span>
+                  <span>Searching places and areas...</span>
                 </div>
               ) : searchResults.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   {searchResults.map((item, idx) => {
                     const isKeyboardSelected = idx === selectedIndex;
+                    const isCityType = item.type === 'CITY';
                     return (
                       <button
                         key={item.placeId || item._id || idx}
@@ -589,39 +598,62 @@ export const BookMyShowLocationModal = ({ isOpen, onClose }) => {
                         style={{
                           padding: '12px 14px',
                           borderRadius: '12px',
-                          backgroundColor: isKeyboardSelected ? '#ecfdf5' : '#f8fafc',
+                          backgroundColor: isKeyboardSelected ? '#ecfdf5' : '#ffffff',
                           border: isKeyboardSelected ? '2px solid #10b981' : '1px solid #e2e8f0',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
                           cursor: 'pointer',
                           textAlign: 'left',
-                          transition: 'all 0.15s ease'
+                          transition: 'all 0.15s ease',
+                          boxShadow: '0 1px 3px rgba(0,0,0,0.02)'
                         }}
+                        className="location-result-row"
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <MapPin size={18} color="#10b981" style={{ flexShrink: 0 }} />
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#0f172a' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+                          <div
+                            style={{
+                              width: '36px',
+                              height: '36px',
+                              borderRadius: '10px',
+                              backgroundColor: isCityType ? '#eff6ff' : '#ecfdf5',
+                              color: isCityType ? '#2563eb' : '#059669',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              flexShrink: 0
+                            }}
+                          >
+                            {isCityType ? <Building2 size={18} /> : <MapPin size={18} />}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                               {item.mainText || item.name}
                             </div>
                             {item.secondaryText && (
-                              <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '2px' }}>
+                              <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                 {item.secondaryText}
                               </div>
                             )}
                           </div>
                         </div>
-                        <span style={{ fontSize: '0.725rem', fontWeight: 700, color: '#10b981', backgroundColor: '#ecfdf5', padding: '4px 8px', borderRadius: '6px', flexShrink: 0 }}>
-                          Select
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                          {item.type && (
+                            <span style={{ fontSize: '0.65rem', fontWeight: 800, color: '#047857', backgroundColor: '#d1fae5', padding: '3px 7px', borderRadius: '6px', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                              {item.type}
+                            </span>
+                          )}
+                          <span style={{ fontSize: '0.75rem', fontWeight: 700, color: '#047857', backgroundColor: '#ecfdf5', border: '1px solid #a7f3d0', padding: '4px 10px', borderRadius: '8px' }}>
+                            Select
+                          </span>
+                        </div>
                       </button>
                     );
                   })}
                 </div>
               ) : searchStatus === 'no_results' ? (
-                <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '0.875rem' }}>
-                  {statusMessage || `No locations found for "${searchQuery}".`}
+                <div style={{ padding: '24px', textAlign: 'center', color: '#64748b', fontSize: '0.875rem', backgroundColor: '#f8fafc', borderRadius: '12px', border: '1px dashed #cbd5e1' }}>
+                  {statusMessage || `No locations found matching "${searchQuery}".`}
                 </div>
               ) : searchStatus === 'error' ? (
                 <div style={{ padding: '20px', textAlign: 'center', color: '#dc2626', fontSize: '0.85rem', backgroundColor: '#fef2f2', borderRadius: '12px', border: '1px solid #fecaca' }}>
