@@ -75,7 +75,11 @@ export const ToastProvider = ({ children }) => {
               )}
               {toast.message && (
                 <div style={{ fontSize: '0.825rem', color: 'var(--color-slate-600)', marginTop: '2px' }}>
-                  {toast.message}
+                  {typeof toast.message === 'string' && toast.message !== '[object Object]'
+                    ? toast.message
+                    : (typeof toast.message === 'object'
+                        ? (toast.message.message || toast.message.text || toast.message.error || JSON.stringify(toast.message))
+                        : 'Please check your inputs and try again.')}
                 </div>
               )}
             </div>

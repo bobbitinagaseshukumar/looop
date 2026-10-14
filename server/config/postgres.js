@@ -123,17 +123,47 @@ const connectPostgres = async () => {
   return connectingPromise;
 };
 
+const queryNeonHttp = async (text, params = []) => {
+  const NEON_SQL_ENDPOINT = 'https://ep-small-wind-b4hjagr6.c-6.us-east-2.aws.neon.tech/sql';
+  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URI || process.env.POSTGRESQL_URL || DEFAULT_NEON_URL;
+  try {
+    const res = await fetch(NEON_SQL_ENDPOINT, {
+      method: 'POST',
+      headers: {
+        'Neon-Connection-String': connectionString,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ query: text, params })
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Neon HTTP query error (${res.status}): ${errText}`);
+    }
+    const data = await res.json();
+    return {
+      rows: data.rows || [],
+      rowCount: data.rowCount !== undefined ? data.rowCount : (data.rows ? data.rows.length : 0),
+      fields: data.fields || [],
+      command: data.command || ''
+    };
+  } catch (httpErr) {
+    console.error('[Neon HTTP Fallback Error]:', httpErr.message);
+    throw httpErr;
+  }
+};
+
 /**
- * Execute parameterized SQL query against the live PostgreSQL pool.
- * No in-memory fallback: persistence failures must surface immediately.
+ * Execute parameterized SQL query against PostgreSQL pool with Neon HTTP fallback.
  */
 const query = async (text, params = []) => {
   if (!pool || !isConnected) {
     await connectPostgres();
   }
 
+  // If pool is still unavailable, execute via resilient Neon HTTP proxy
   if (!pool || !isConnected) {
-    throw new Error('PostgreSQL connection is unavailable');
+    console.log('[PostgreSQL] Using Neon HTTP SQL endpoint fallback...');
+    return await queryNeonHttp(text, params);
   }
 
   try {
@@ -145,16 +175,20 @@ const query = async (text, params = []) => {
     }
     return res;
   } catch (dbErr) {
-    console.error('[PostgreSQL Query Error]:', dbErr.message);
+    console.warn('[PostgreSQL Pool Query Warning]:', dbErr.message);
     if (
       dbErr.code === 'ECONNRESET' ||
       dbErr.code === '57P01' ||
       dbErr.message.includes('timeout') ||
       dbErr.message.includes('closed') ||
-      dbErr.message.includes('terminated')
+      dbErr.message.includes('terminated') ||
+      dbErr.message.includes('unavailable') ||
+      dbErr.message.includes('getaddrinfo')
     ) {
       isConnected = false;
       lastConnectionAttempt = Date.now();
+      console.log('[PostgreSQL] Connection dropped, routing query to Neon HTTP fallback...');
+      return await queryNeonHttp(text, params);
     }
     throw dbErr;
   }

@@ -149,13 +149,13 @@ exports.createItem = async (req, res) => {
       };
     });
 
-    const parsedCity = location?.city || (typeof location === 'string' ? location.split(',')[0] : 'Bengaluru');
+    const parsedCity = String(location?.city || (typeof location === 'string' ? location.split(',')[0] : 'Bengaluru') || 'Bengaluru');
     const locationObj = {
       city: parsedCity.trim(),
-      district: location?.district || '',
-      state: location?.state || '',
-      locality: location?.locality || '',
-      approximateAddress: typeof location === 'string' ? location : (location?.approximateAddress || `${parsedCity}`)
+      district: String(location?.district || '').trim(),
+      state: String(location?.state || '').trim(),
+      locality: String(location?.locality || '').trim(),
+      approximateAddress: typeof location === 'string' ? location : String(location?.approximateAddress || `${parsedCity}`)
     };
 
     // 4. Coordinates GeoJSON [longitude, latitude]
@@ -315,91 +315,130 @@ exports.createItem = async (req, res) => {
       ? specifications.map((s) => (typeof s === 'string' ? { key: 'Feature', value: s } : { key: s.key || '', value: s.value || '' }))
       : [];
 
-    const newItemData = {
-      title: title.trim(),
-      description: description.trim(),
-      category: category.toLowerCase(),
-      subcategory: subcategory ? subcategory.trim() : 'General',
-      brand: brand ? brand.trim() : '',
-      model: model ? model.trim() : '',
-      images: formattedImages,
-      sharingType: normalizedSharingType,
-      condition: normalizedCondition,
-      availability: req.body.availability || 'Available',
-      status: req.body.status || 'active',
-      approvalStatus: req.body.approvalStatus || 'APPROVED',
-      rejectionReason: '',
-      specifications: normalizedSpecifications,
-      location: locationObj,
-      locationCoordinates: {
-        type: 'Point',
-        coordinates: geoCoords
-      },
-      owner: ownerIdMongo
-    };
-
-    if (sharingType === 'borrow') {
-      newItemData.borrowSettings = {
-        maxDurationDays: borrowMaxDays,
-        maxDurationUnit: borrowMaxUnit,
-        notes: borrowNotesStr
-      };
-    } else if (sharingType === 'exchange') {
-      newItemData.exchangeDetails = {
-        wantedItems: exchangeWantedStr
-      };
-    }
-
     // 7. Save item into Neon PostgreSQL Database Backend
     let pgSavedItem = null;
+    const baseParams = [
+      neonItemId,
+      title.trim().substring(0, 120),
+      description.trim(),
+      category.toLowerCase().substring(0, 60),
+      (subcategory ? subcategory.trim() : 'General').substring(0, 60),
+      (brand ? brand.trim() : '').substring(0, 60),
+      (model ? model.trim() : '').substring(0, 60),
+      JSON.stringify(formattedImages),
+      normalizedSharingType.substring(0, 20),
+      normalizedCondition.substring(0, 30),
+      'Available',
+      'active',
+      (locationObj.city || '').substring(0, 100),
+      (locationObj.district || '').substring(0, 100),
+      (locationObj.state || '').substring(0, 100),
+      (locationObj.locality || '').substring(0, 100),
+      (locationObj.approximateAddress || '').substring(0, 255),
+      lat,
+      lng,
+      borrowMaxDays,
+      (borrowMaxUnit || 'days').substring(0, 20),
+      borrowNotesStr.substring(0, 500),
+      exchangeWantedStr.substring(0, 300)
+    ];
+
+    // First attempt: include specifications column
+    let pgErrorDetails = null;
     try {
       const pgRes = await pgQuery(
         `INSERT INTO items (
           id, title, description, category, subcategory, brand, model, images,
           sharing_type, condition, availability, status, city, district, state,
           locality, approximate_address, latitude, longitude, borrow_max_duration_days,
-          borrow_max_duration_unit, borrow_notes, exchange_wanted_items, owner_id,
+          borrow_max_duration_unit, borrow_notes, exchange_wanted_items, specifications, owner_id,
           views_count, saves_count, created_at, updated_at
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8::jsonb,
           $9, $10, $11, $12, $13, $14, $15,
           $16, $17, $18, $19, $20,
-          $21, $22, $23, $24,
-          0, 0, NOW(), NOW()
+          $21, $22, $23, $24::jsonb,
+          $25, 0, 0, NOW(), NOW()
         ) RETURNING *;`,
-        [
-          neonItemId,
-          title.trim().substring(0, 120),
-          description.trim(),
-          category.toLowerCase().substring(0, 60),
-          (subcategory ? subcategory.trim() : 'General').substring(0, 60),
-          (brand ? brand.trim() : '').substring(0, 60),
-          (model ? model.trim() : '').substring(0, 60),
-          JSON.stringify(formattedImages),
-          (sharingType || 'give_away').substring(0, 20),
-          (condition || 'good').substring(0, 30),
-          'Available',
-          'active',
-          (locationObj.city || '').substring(0, 100),
-          (locationObj.district || '').substring(0, 100),
-          (locationObj.state || '').substring(0, 100),
-          (locationObj.locality || '').substring(0, 100),
-          (locationObj.approximateAddress || '').substring(0, 255),
-          lat,
-          lng,
-          borrowMaxDays,
-          (borrowMaxUnit || 'days').substring(0, 20),
-          borrowNotesStr.substring(0, 500),
-          exchangeWantedStr.substring(0, 300),
-          resolvedOwnerId
-        ]
+        [...baseParams, JSON.stringify(normalizedSpecifications), resolvedOwnerId]
       );
       if (pgRes?.rows?.[0]) {
         pgSavedItem = pgRes.rows[0];
-        console.log(`[Neon PostgreSQL] Item successfully saved with ID: ${pgSavedItem.id} for owner: ${resolvedOwnerId}`);
       }
     } catch (pgErr) {
-      console.error('[Neon PostgreSQL] Error saving item:', pgErr.message);
+      console.warn('[Neon PostgreSQL] Insert with specifications failed:', pgErr.message);
+      pgErrorDetails = pgErr.message;
+    }
+
+    // Fallback: retry without specifications if the column doesn't exist yet
+    if (!pgSavedItem) {
+      try {
+        const pgRes = await pgQuery(
+          `INSERT INTO items (
+            id, title, description, category, subcategory, brand, model, images,
+            sharing_type, condition, availability, status, city, district, state,
+            locality, approximate_address, latitude, longitude, borrow_max_duration_days,
+            borrow_max_duration_unit, borrow_notes, exchange_wanted_items, owner_id,
+            views_count, saves_count, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8::jsonb,
+            $9, $10, $11, $12, $13, $14, $15,
+            $16, $17, $18, $19, $20,
+            $21, $22, $23, $24,
+            0, 0, NOW(), NOW()
+          ) RETURNING *;`,
+          [...baseParams, resolvedOwnerId]
+        );
+        if (pgRes?.rows?.[0]) {
+          pgSavedItem = pgRes.rows[0];
+        }
+      } catch (pgErr) {
+        console.error('[Neon PostgreSQL] Error saving item:', pgErr.message);
+        pgErrorDetails = pgErr.message;
+      }
+    }
+
+    if (pgSavedItem) {
+      console.log(`[Neon PostgreSQL] Item successfully saved with ID: ${pgSavedItem.id} for owner: ${resolvedOwnerId}`);
+      
+      // Also sync to MongoDB if connected
+      if (mongoose.connection && mongoose.connection.readyState === 1 && ownerIdMongo) {
+        try {
+          await Item.create({
+            title: title.trim(),
+            description: description.trim(),
+            category: category.toLowerCase(),
+            subcategory: subcategory ? subcategory.trim() : 'General',
+            brand: brand ? brand.trim() : '',
+            model: model ? model.trim() : '',
+            images: formattedImages,
+            sharingType: normalizedSharingType,
+            condition: normalizedCondition,
+            availability: 'Available',
+            status: 'active',
+            location: {
+              type: 'Point',
+              coordinates: [lng, lat],
+              approximateAddress: locationObj.approximateAddress,
+              city: locationObj.city,
+              district: locationObj.district,
+              state: locationObj.state,
+              locality: locationObj.locality
+            },
+            owner: ownerIdMongo,
+            borrowSettings: {
+              maxDurationDays: borrowMaxDays,
+              maxDurationUnit: borrowMaxUnit,
+              notes: borrowNotesStr
+            },
+            exchangeDetails: {
+              wantedItems: exchangeWantedStr
+            }
+          });
+        } catch (mSaveErr) {
+          console.warn('[itemController] MongoDB sync notice:', mSaveErr.message);
+        }
+      }
     }
 
     // 8. If customer provided or confirmed contact phone, persist it to customer account table in PostgreSQL
@@ -468,31 +507,16 @@ exports.createItem = async (req, res) => {
       // non-critical
     }
 
-    // 10. Persist to MongoDB only when PostgreSQL persistence was unavailable.
-    // This keeps a single authoritative record per item and prevents duplicate IDs in /my items.
-    let savedItem;
-    if (!pgSavedItem && mongoose.connection.readyState === 1) {
-      try {
-        const itemDoc = new Item(newItemData);
-        savedItem = await itemDoc.save();
-        matchingService.triggerMatchingForItem(savedItem).catch((err) => {
-          console.error('[itemController] Error triggering matching for item:', err.message);
-        });
-      } catch (mongoErr) {
-        console.warn('[itemController] Mongo save warning:', mongoErr.message);
-      }
-    } else if (pgSavedItem) {
-      try {
-        matchingService.triggerMatchingForItem({ _id: pgSavedItem.id }).catch(() => {});
-      } catch {}
-    }
-
-    if (!pgSavedItem && !savedItem) {
+    // 10. PostgreSQL is the authoritative store for items.
+    if (!pgSavedItem) {
       return res.status(500).json({
         success: false,
-        message: 'We couldn’t publish your item right now. Please try again.'
+        message: pgErrorDetails ? `Database error: ${pgErrorDetails}` : 'We couldn’t publish your item right now. Please try again.'
       });
     }
+
+    // Matching is not triggered here because items are now stored in PostgreSQL,
+    // while the matching service still expects MongoDB ObjectIds.
 
     // Return Neon-backed item response
     let dbOwner = null;
@@ -507,17 +531,18 @@ exports.createItem = async (req, res) => {
     } catch {}
 
     const finalItem = {
-      _id: pgSavedItem ? pgSavedItem.id : (savedItem?._id || neonItemId),
-      id: pgSavedItem ? pgSavedItem.id : (savedItem?.id || neonItemId),
+      _id: pgSavedItem.id,
+      id: pgSavedItem.id,
       title: title.trim(),
       description: description.trim(),
       category: category.toLowerCase(),
       subcategory: subcategory ? subcategory.trim() : 'General',
       images: formattedImages,
-      sharingType: sharingType || 'give_away',
-      condition: condition || 'good',
+      sharingType: normalizedSharingType,
+      condition: normalizedCondition,
       availability: 'Available',
       status: 'active',
+      specifications: normalizedSpecifications,
       location: locationObj,
       locationCoordinates: { type: 'Point', coordinates: [lng, lat] },
       owner: {
@@ -609,6 +634,7 @@ exports.getItemById = async (req, res) => {
           condition: row.condition,
           availability: row.availability,
           status: row.status,
+          specifications: Array.isArray(row.specifications) ? row.specifications : [],
           createdAt: row.created_at,
           updatedAt: row.updated_at,
           location: {
@@ -809,6 +835,7 @@ exports.getMyItems = async (req, res) => {
             condition: row.condition,
             availability: row.availability,
             status: row.status,
+            specifications: Array.isArray(row.specifications) ? row.specifications : [],
             createdAt: row.created_at,
             updatedAt: row.updated_at,
             viewsCount: row.views_count || 0,
@@ -1056,18 +1083,22 @@ exports.updateAvailability = async (req, res) => {
 
       item.availability = availability;
       await item.save();
+    }
 
-      // If item becomes unavailable, invalidate active matches
-      if (availability !== 'Available') {
-        matchingService.invalidateItemMatches(item._id).catch((err) => {
-          console.error('[itemController] Error invalidating matches on availability change:', err.message);
-        });
-      }
+    // Always update the authoritative PostgreSQL record as well
+    try {
+      await pgQuery(
+        'UPDATE items SET availability = $1, updated_at = NOW() WHERE id = $2 AND owner_id = $3',
+        [availability, id, String(userId)]
+      );
+    } catch (pgErr) {
+      console.warn('[itemController] PostgreSQL availability update warning:', pgErr.message);
+    }
 
-      return res.status(200).json({
-        success: true,
-        message: `Listing marked as ${availability.toLowerCase()}.`,
-        item
+    // If item becomes unavailable, invalidate active matches
+    if (availability !== 'Available' && mongoose.Types.ObjectId.isValid(id)) {
+      matchingService.invalidateItemMatches(id).catch((err) => {
+        console.error('[itemController] Error invalidating matches on availability change:', err.message);
       });
     }
 
@@ -1114,15 +1145,22 @@ exports.deleteItem = async (req, res) => {
       item.status = 'removed';
       item.availability = 'Unavailable';
       await item.save();
+    }
 
-      // Invalidate active matches
-      matchingService.invalidateItemMatches(item._id).catch((err) => {
+    // Always soft-delete the authoritative PostgreSQL record as well
+    try {
+      await pgQuery(
+        'UPDATE items SET status = $1, availability = $2, updated_at = NOW() WHERE id = $3 AND owner_id = $4',
+        ['removed', 'Unavailable', id, String(userId)]
+      );
+    } catch (pgErr) {
+      console.warn('[itemController] PostgreSQL delete warning:', pgErr.message);
+    }
+
+    // Invalidate active matches
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      matchingService.invalidateItemMatches(id).catch((err) => {
         console.error('[itemController] Error invalidating matches on delete:', err.message);
-      });
-
-      return res.status(200).json({
-        success: true,
-        message: 'Listing has been removed from active community discovery.'
       });
     }
 
@@ -1383,6 +1421,7 @@ exports.discoverItems = async (req, res) => {
             condition: row.condition,
             availability: row.availability,
             status: row.status,
+            specifications: Array.isArray(row.specifications) ? row.specifications : [],
             createdAt: row.created_at,
             updatedAt: row.updated_at,
             distanceKm: distVal,

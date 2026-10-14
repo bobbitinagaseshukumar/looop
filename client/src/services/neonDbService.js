@@ -339,16 +339,20 @@ export const neonDb = {
         const savedId = insertRes.rows[0].id;
         console.log(`[Neon DB Direct] Item successfully persisted into PostgreSQL with ID: ${savedId}`);
         // Fetch fully hydrated item with owner metadata
-        const fullItem = await neonDb.getItemById(savedId);
-        if (fullItem) return fullItem;
+        try {
+          const fullItem = await neonDb.getItemById(savedId);
+          if (fullItem) return fullItem;
+        } catch {}
         return mapRowToItem(insertRes.rows[0]);
       } else {
-        console.error('[Neon DB Direct Save Error]', insertRes.error || 'No rows returned on insert');
+        const errDetail = insertRes.error ? (typeof insertRes.error === 'string' ? insertRes.error : JSON.stringify(insertRes.error)) : 'Database did not return saved record';
+        console.error('[Neon DB Direct Save Error]', errDetail);
+        throw new Error(errDetail);
       }
     } catch (err) {
       console.error('[Neon DB Direct Save Exception]', err.message);
+      throw err;
     }
-    return null;
   },
 
   /**

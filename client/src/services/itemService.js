@@ -374,91 +374,88 @@ export const itemService = {
       currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
     } catch {}
 
-    let serverItem = null;
+    let apiErrorMsg = '';
+
+    // 1. Attempt authoritative backend REST API
     try {
-      const response = await api.post('/items', itemData, { timeout: 6000 });
-      if (response.data && response.data.item) {
-        serverItem = response.data.item;
+      const response = await api.post('/items', itemData);
+      if (response.data && response.data.success && response.data.item) {
+        const serverItem = response.data.item;
+        const finalItem = {
+          id: serverItem._id || serverItem.id,
+          _id: serverItem._id || serverItem.id,
+          ...serverItem
+        };
+
+        saveLocalSharedItem(finalItem);
+        mockItems.unshift(finalItem);
+        recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
+
+        return {
+          success: true,
+          message: response.data.message || 'Your item has been shared and saved to database!',
+          item: finalItem
+        };
+      }
+      if (response.data && !response.data.success) {
+        const dataMsg = response.data.message;
+        apiErrorMsg = typeof dataMsg === 'string' && dataMsg !== '[object Object]'
+          ? dataMsg
+          : (dataMsg?.message || response.data.error || 'Server rejected listing publication.');
       }
     } catch (err) {
-      console.warn('[itemService.createItem] API attempt notice:', err.message);
-    }
-
-    // Direct Neon Database Sync Guarantee:
-    // Ensures item is stored directly in Neon PostgreSQL Cloud Database even in serverless or offline dev modes
-    let directNeonItem = null;
-    try {
-      directNeonItem = await neonDb.saveItem(serverItem || itemData, currentUser);
-    } catch (neonErr) {
-      console.warn('[itemService.createItem] Direct Neon sync notice:', neonErr.message);
-    }
-
-    let finalItem = directNeonItem || (serverItem ? { id: serverItem._id || serverItem.id, _id: serverItem._id || serverItem.id, ...serverItem } : null);
-
-    if (!finalItem) {
-      // Create persistent structured item fallback
-      const newId = itemData.id || itemData._id || `item-${Date.now()}`;
-      const primaryImage = Array.isArray(itemData.images) && itemData.images.length > 0
-        ? (typeof itemData.images[0] === 'string' ? itemData.images[0] : itemData.images[0].url)
-        : 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
-
-      const normalizedImages = Array.isArray(itemData.images) && itemData.images.length > 0
-        ? itemData.images.map((img) => (typeof img === 'string' ? { url: img, isPrimary: true } : img))
-        : [{ url: primaryImage, isPrimary: true }];
-
-      const locCity = itemData.location?.city || (typeof itemData.location === 'string' ? itemData.location.split(',')[0] : 'Bengaluru');
-      const locLocality = itemData.location?.locality || '';
-
-      finalItem = {
-        id: newId,
-        _id: newId,
-        title: itemData.title,
-        description: itemData.description,
-        category: itemData.category,
-        subcategory: itemData.subcategory || 'General',
-        brand: itemData.brand || '',
-        model: itemData.model || '',
-        sharingType: itemData.sharingType || 'give_away',
-        condition: itemData.condition || 'good',
-        images: normalizedImages,
-        location: {
-          city: locCity,
-          locality: locLocality,
-          approximateAddress: `${locLocality ? locLocality + ', ' : ''}${locCity}`
-        },
-        locationCoordinates: {
-          type: 'Point',
-          coordinates: itemData.coordinates || [77.5946, 12.9716]
-        },
-        availability: 'Available',
-        status: 'active',
-        borrowSettings: itemData.borrowSettings || null,
-        exchangeDetails: itemData.exchangeDetails || null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        viewsCount: 1,
-        savesCount: 0,
-        owner: {
-          id: currentUser.id || currentUser._id || 'usr-local',
-          _id: currentUser.id || currentUser._id || 'usr-local',
-          name: currentUser.name || 'LOOOP Member',
-          email: currentUser.email || '',
-          avatar: currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-          trustScore: currentUser.trustScore || 100,
-          rating: 5.0,
-          verified: true
+      console.warn('[itemService.createItem] REST API call notice:', err.message);
+      const rawData = err.data || err.response?.data;
+      if (rawData && typeof rawData === 'object') {
+        if (typeof rawData.message === 'string' && rawData.message !== '[object Object]') {
+          apiErrorMsg = rawData.message;
+        } else if (typeof rawData.error === 'string' && rawData.error !== '[object Object]') {
+          apiErrorMsg = rawData.error;
+        } else if (rawData.error?.message) {
+          apiErrorMsg = rawData.error.message;
         }
-      };
+      }
+      if (!apiErrorMsg && typeof err.message === 'string' && err.message !== '[object Object]') {
+        apiErrorMsg = err.message;
+      }
     }
 
-    saveLocalSharedItem(finalItem);
-    mockItems.unshift(finalItem);
-    recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
+    // 2. Direct Neon PostgreSQL Cloud Database Fallback
+    // Guarantees item is stored directly in Neon Database even if backend is offline, proxy fails, or network drops
+    try {
+      console.log('[itemService.createItem] Storing item directly into Neon PostgreSQL database...');
+      const dbItem = await neonDb.saveItem(itemData, currentUser);
+      if (dbItem && (dbItem.id || dbItem._id)) {
+        const finalItem = {
+          id: dbItem._id || dbItem.id,
+          _id: dbItem._id || dbItem.id,
+          ...dbItem
+        };
+
+        saveLocalSharedItem(finalItem);
+        mockItems.unshift(finalItem);
+        recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
+
+        return {
+          success: true,
+          message: 'Your item has been shared and saved directly to the database!',
+          item: finalItem
+        };
+      }
+    } catch (neonErr) {
+      console.error('[itemService.createItem] Direct Neon database save error:', neonErr.message);
+      if (!apiErrorMsg && typeof neonErr.message === 'string' && neonErr.message !== '[object Object]') {
+        apiErrorMsg = neonErr.message;
+      }
+    }
+
+    const fallbackMsg = (apiErrorMsg && typeof apiErrorMsg === 'string' && apiErrorMsg !== '[object Object]')
+      ? apiErrorMsg
+      : 'We couldn’t publish your item right now. Please try again.';
 
     return {
-      success: true,
-      message: 'Your item has been shared and saved to database!',
-      item: finalItem
+      success: false,
+      message: fallbackMsg
     };
   },
 
@@ -633,13 +630,8 @@ export const itemService = {
     try {
       const response = await api.patch(`/items/${id}/availability`, { availability });
       return response.data;
-    } catch {
-      const item = mockItems.find((i) => i.id === id || i._id === id);
-      if (item) {
-        item.availability = availability;
-        item.status = availability === 'Available' ? 'AVAILABLE' : 'UNAVAILABLE';
-      }
-      return { success: true, item: { id, availability } };
+    } catch (err) {
+      return { success: false, message: err?.message || 'Failed to update availability.' };
     }
   },
 
@@ -650,13 +642,8 @@ export const itemService = {
     try {
       const response = await api.delete(`/items/${id}`);
       return response.data;
-    } catch {
-      const itemIndex = mockItems.findIndex((i) => i.id === id || i._id === id);
-      if (itemIndex !== -1) {
-        mockItems[itemIndex].status = 'removed';
-        mockItems[itemIndex].availability = 'Unavailable';
-      }
-      return { success: true, message: 'Item removed from active discovery.' };
+    } catch (err) {
+      return { success: false, message: err?.message || 'Failed to remove listing.' };
     }
   },
 

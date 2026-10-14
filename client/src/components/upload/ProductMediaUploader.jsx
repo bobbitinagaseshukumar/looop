@@ -104,11 +104,7 @@ export default function ProductMediaUploader({ images = [], onChange, onError })
     const formData = new FormData();
     formData.append('file', file);
 
-    const res = await api.post('/items/upload-media', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      }
-    });
+    const res = await api.post('/items/upload-media', formData);
 
     if (res.data?.success && res.data?.file?.url) {
       return res.data.file.url;
