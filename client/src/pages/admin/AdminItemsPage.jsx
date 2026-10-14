@@ -9,7 +9,8 @@ import {
   AlertTriangle,
   MapPin,
   CheckCircle,
-  ExternalLink
+  ExternalLink,
+  RefreshCw
 } from 'lucide-react';
 import adminService from '../../services/adminService';
 import AdminTable from '../../components/admin/AdminTable';
@@ -34,6 +35,8 @@ let wantedAlreadyLoaded = false;
 try {
   localStorage.removeItem('looop_admin_items_cache');
   localStorage.removeItem('looop_admin_items_total');
+  localStorage.removeItem('looop_admin_items_cache_v3');
+  localStorage.removeItem('looop_admin_items_total_v3');
 } catch {}
 
 const getItemImageUrl = (item) => {
@@ -46,11 +49,11 @@ const getItemImageUrl = (item) => {
 export const AdminItemsPage = () => {
   const [activeTab, setActiveTab] = useState('items'); // 'items' | 'wanted'
   const [items, setItems] = useState(() => {
-    if (persistentItems) return persistentItems;
+    if (persistentItems && persistentItems.length > 0) return persistentItems;
     try {
-      const cached = localStorage.getItem('looop_admin_items_cache_v3');
+      const cached = localStorage.getItem('looop_admin_items_cache_v4');
       const parsed = cached ? JSON.parse(cached) : null;
-      if (parsed) {
+      if (parsed && Array.isArray(parsed) && parsed.length > 0) {
         persistentItems = parsed;
         itemsAlreadyLoaded = true;
         return parsed;
@@ -62,7 +65,7 @@ export const AdminItemsPage = () => {
   const [total, setTotal] = useState(() => {
     if (persistentTotal >= 0 && itemsAlreadyLoaded) return persistentTotal;
     try {
-      const cached = localStorage.getItem('looop_admin_items_total_v3');
+      const cached = localStorage.getItem('looop_admin_items_total_v4');
       return cached ? parseInt(cached, 10) : 0;
     } catch {
       return 0;
@@ -75,7 +78,7 @@ export const AdminItemsPage = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [sharingTypeFilter, setSharingTypeFilter] = useState('');
   const [isLoading, setIsLoading] = useState(() => {
-    if (itemsAlreadyLoaded && persistentItems) {
+    if (itemsAlreadyLoaded && persistentItems && persistentItems.length > 0) {
       return false;
     }
     return true;
@@ -106,18 +109,18 @@ export const AdminItemsPage = () => {
           status: statusFilter
         });
         if (res?.success) {
-          const list = res.data.items || [];
+          const list = res.data?.items || [];
           setItems(list);
-          setTotal(res.data.total || 0);
-          setTotalPages(res.data.totalPages || 1);
+          setTotal(res.data?.total || 0);
+          setTotalPages(res.data?.totalPages || 1);
           persistentItems = list;
-          persistentTotal = res.data.total || 0;
-          persistentTotalPages = res.data.totalPages || 1;
+          persistentTotal = res.data?.total || 0;
+          persistentTotalPages = res.data?.totalPages || 1;
           itemsAlreadyLoaded = true;
           if (page === 1 && !search && !categoryFilter && !sharingTypeFilter && !statusFilter) {
             try {
-              localStorage.setItem('looop_admin_items_cache_v3', JSON.stringify(list));
-              localStorage.setItem('looop_admin_items_total_v3', String(res.data.total || 0));
+              localStorage.setItem('looop_admin_items_cache_v4', JSON.stringify(list));
+              localStorage.setItem('looop_admin_items_total_v4', String(res.data?.total || 0));
             } catch {}
           }
         }
@@ -130,12 +133,12 @@ export const AdminItemsPage = () => {
           status: statusFilter
         });
         if (res?.success) {
-          const wList = res.data.wantedItems || [];
+          const wList = res.data?.wantedItems || [];
           setWantedItems(wList);
-          setTotal(res.data.total || 0);
-          setTotalPages(res.data.totalPages || 1);
+          setTotal(res.data?.total || 0);
+          setTotalPages(res.data?.totalPages || 1);
           persistentWanted = wList;
-          persistentWantedTotal = res.data.total || 0;
+          persistentWantedTotal = res.data?.total || 0;
           wantedAlreadyLoaded = true;
         }
       }
@@ -149,23 +152,14 @@ export const AdminItemsPage = () => {
     }
   }, [activeTab, page, search, categoryFilter, statusFilter, sharingTypeFilter]);
 
-  // Strictly do NOT reload if already loaded once when navigating between sections
+  // SWR: render cached immediately, but ALWAYS fetch fresh data quietly in background
   useEffect(() => {
     if (activeTab === 'items') {
-      const isDefaultView = page === 1 && !search && !categoryFilter && !sharingTypeFilter && !statusFilter;
-      if (itemsAlreadyLoaded && persistentItems && persistentItems.length > 0 && isDefaultView) {
-        // Already loaded! Do not reload or re-render skeletons when returning to this page
-        setIsLoading(false);
-        return;
-      }
-      fetchData(itemsAlreadyLoaded);
+      const hasCached = items && items.length > 0;
+      fetchData(hasCached);
     } else {
-      const isDefaultView = page === 1 && !search && !categoryFilter && !statusFilter;
-      if (wantedAlreadyLoaded && persistentWanted && isDefaultView) {
-        setIsLoading(false);
-        return;
-      }
-      fetchData(wantedAlreadyLoaded);
+      const hasCached = wantedItems && wantedItems.length > 0;
+      fetchData(hasCached);
     }
   }, [activeTab, page, search, categoryFilter, statusFilter, sharingTypeFilter, fetchData]);
 
@@ -495,46 +489,71 @@ export const AdminItemsPage = () => {
           </p>
         </div>
 
-        {/* Tab Switcher */}
-        <div style={{ display: 'flex', backgroundColor: '#1e293b', padding: '2px', borderRadius: 'var(--radius-sm)', border: '1px solid #334155' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <button
             type="button"
-            onClick={() => {
-              setActiveTab('items');
-              setPage(1);
-            }}
+            onClick={() => fetchData(false)}
+            disabled={isLoading}
+            title="Refresh listings from database"
             style={{
-              padding: '6px 14px',
-              border: 'none',
-              borderRadius: 'var(--radius-xs)',
-              backgroundColor: activeTab === 'items' ? 'var(--color-primary-600)' : 'transparent',
-              color: activeTab === 'items' ? '#ffffff' : '#94a3b8',
-              fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              backgroundColor: '#1e293b',
+              border: '1px solid #334155',
+              borderRadius: 'var(--radius-sm)',
+              color: '#38bdf8',
+              fontSize: '0.825rem',
               fontWeight: 600,
-              cursor: 'pointer'
+              cursor: isLoading ? 'not-allowed' : 'pointer'
             }}
           >
-            Listed Items
+            <RefreshCw size={14} style={{ animation: isLoading ? 'spin 1s linear infinite' : 'none' }} />
+            <span>Refresh</span>
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('wanted');
-              setPage(1);
-            }}
-            style={{
-              padding: '6px 14px',
-              border: 'none',
-              borderRadius: 'var(--radius-xs)',
-              backgroundColor: activeTab === 'wanted' ? 'var(--color-primary-600)' : 'transparent',
-              color: activeTab === 'wanted' ? '#ffffff' : '#94a3b8',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            Wanted Requests
-          </button>
+
+          {/* Tab Switcher */}
+          <div style={{ display: 'flex', backgroundColor: '#1e293b', padding: '2px', borderRadius: 'var(--radius-sm)', border: '1px solid #334155' }}>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('items');
+                setPage(1);
+              }}
+              style={{
+                padding: '6px 14px',
+                border: 'none',
+                borderRadius: 'var(--radius-xs)',
+                backgroundColor: activeTab === 'items' ? 'var(--color-primary-600)' : 'transparent',
+                color: activeTab === 'items' ? '#ffffff' : '#94a3b8',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Listed Items
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('wanted');
+                setPage(1);
+              }}
+              style={{
+                padding: '6px 14px',
+                border: 'none',
+                borderRadius: 'var(--radius-xs)',
+                backgroundColor: activeTab === 'wanted' ? 'var(--color-primary-600)' : 'transparent',
+                color: activeTab === 'wanted' ? '#ffffff' : '#94a3b8',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                cursor: 'pointer'
+              }}
+            >
+              Wanted Requests
+            </button>
+          </div>
         </div>
       </div>
 

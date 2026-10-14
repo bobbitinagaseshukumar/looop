@@ -29,11 +29,23 @@ function buildLooopEmailHtml({
 }) {
   const formattedName = recipientName ? recipientName.trim() : 'Member';
 
-  // Format OTP digits with spacing e.g., "4 8 2 7 3 1"
-  let formattedOtp = otpCode;
+  // Format OTP individual colored boxes in a single non-wrapping row
+  let otpBoxesHtml = '';
   if (isOtp && otpCode) {
-    const rawDigits = String(otpCode).replace(/\s+/g, '');
-    formattedOtp = rawDigits.split('').join(' ');
+    const rawDigits = String(otpCode).replace(/\D/g, '').split('');
+    const DIGIT_COLORS = [
+      { bg: '#ecfdf5', border: '#10b981', color: '#047857', shadow: 'rgba(16, 185, 129, 0.22)' }, // 1: Emerald
+      { bg: '#f0fdfa', border: '#14b8a6', color: '#0f766e', shadow: 'rgba(20, 184, 166, 0.22)' }, // 2: Teal
+      { bg: '#eff6ff', border: '#3b82f6', color: '#1d4ed8', shadow: 'rgba(59, 130, 246, 0.22)' }, // 3: Blue
+      { bg: '#eef2ff', border: '#6366f1', color: '#4338ca', shadow: 'rgba(99, 102, 241, 0.22)' }, // 4: Indigo
+      { bg: '#faf5ff', border: '#a855f7', color: '#7e22ce', shadow: 'rgba(168, 85, 247, 0.22)' }, // 5: Purple
+      { bg: '#fff1f2', border: '#f43f5e', color: '#be123c', shadow: 'rgba(244, 63, 94, 0.22)' }   // 6: Rose
+    ];
+
+    otpBoxesHtml = rawDigits.map((digit, idx) => {
+      const c = DIGIT_COLORS[idx % DIGIT_COLORS.length];
+      return `<td align="center" valign="middle" style="padding: 0; width: 42px; min-width: 42px; max-width: 42px; height: 52px; min-height: 52px; max-height: 52px; background-color: ${c.bg}; border: 2px solid ${c.border}; border-radius: 12px; font-size: 28px; font-weight: 800; color: ${c.color}; text-align: center; line-height: 50px; box-shadow: 0 4px 10px ${c.shadow}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'SF Mono', Consolas, monospace;">${digit}</td>`;
+    }).join('');
   }
 
   // Render Card rows key-value pairs
@@ -48,14 +60,18 @@ function buildLooopEmailHtml({
 
   const cardHtml = isOtp
     ? `
-      <div style="background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%); border: 2px solid #10b981; border-radius: 16px; padding: 28px 20px; text-align: center; margin: 24px 0; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.12);">
-        <div style="display: inline-block; background-color: #d1fae5; color: #065f46; font-size: 11px; font-weight: 800; padding: 4px 14px; border-radius: 20px; letter-spacing: 1.5px; text-transform: uppercase;">
+      <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #f0fdfa 100%); border: 2px solid #10b981; border-radius: 18px; padding: 26px 14px; text-align: center; margin: 24px 0; box-shadow: 0 6px 20px rgba(16, 185, 129, 0.14); overflow: hidden;">
+        <div style="display: inline-block; background-color: #065f46; color: #ffffff; font-size: 11px; font-weight: 800; padding: 5px 16px; border-radius: 20px; letter-spacing: 1.5px; text-transform: uppercase;">
           ONE-TIME VERIFICATION CODE
         </div>
-        <div style="font-size: 40px; font-weight: 900; letter-spacing: 10px; color: #047857; margin: 18px 0 12px 0; font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;">
-          ${formattedOtp}
+        <div style="margin: 20px auto 16px auto; text-align: center; white-space: nowrap !important;">
+          <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: separate; border-spacing: 6px; white-space: nowrap !important; table-layout: fixed;">
+            <tr style="white-space: nowrap !important;">
+              ${otpBoxesHtml}
+            </tr>
+          </table>
         </div>
-        <div style="display: inline-block; background-color: #ffffff; border: 1px solid #a7f3d0; border-radius: 8px; padding: 4px 12px; font-size: 12px; font-weight: 700; color: #059669;">
+        <div style="display: inline-block; background-color: #ffffff; border: 1.5px solid #a7f3d0; border-radius: 20px; padding: 5px 14px; font-size: 12px; font-weight: 700; color: #047857; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
           ⏱ Valid for ${otpExpiry || '10 minutes'}
         </div>
       </div>

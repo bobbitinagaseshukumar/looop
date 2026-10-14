@@ -75,12 +75,7 @@ export const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    if (dashboardAlreadyLoaded && persistentDashboardData) {
-      // STRICTLY DO NOT RELOAD OR SHOW SKELETONS WHEN RETURNING TO THIS SECTION
-      setIsLoading(false);
-      return;
-    }
-    const hasCache = !!data;
+    const hasCache = !!(dashboardAlreadyLoaded && persistentDashboardData) || !!data;
     fetchDashboard(range, hasCache);
   }, [range]);
 

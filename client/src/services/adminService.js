@@ -341,7 +341,7 @@ export const adminService = {
       if (params.condition) query.append('condition', params.condition);
 
       const res = await api.get(`/admin/items?${query.toString()}`);
-      if (res?.data?.success && res?.data?.data?.items?.length > 0) {
+      if (res?.data?.success) {
         return res.data;
       }
     } catch (err) {
