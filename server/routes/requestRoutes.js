@@ -27,4 +27,8 @@ router.patch('/:id/decline', requestController.declineRequest);
 // PATCH /api/requests/:id/cancel - Cancel own pending request (requester only)
 router.patch('/:id/cancel', requestController.cancelRequest);
 
+// PATCH & POST /api/requests/:id/taken - Mark item as taken, conclude handover, and delete chat messages from DB
+router.patch('/:id/taken', requestController.markItemTaken);
+router.post('/:id/taken', requestController.markItemTaken);
+
 module.exports = router;

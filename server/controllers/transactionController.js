@@ -725,6 +725,30 @@ exports.confirmCustomerReceipt = async (req, res) => {
       if (transaction.request) {
         await Request.findByIdAndUpdate(transaction.request, { status: 'COMPLETED', completedAt: new Date() });
       }
+
+      // Permanently delete all chat messages from database upon item handover completion
+      try {
+        const Conversation = require('../models/Conversation');
+        const Message = require('../models/Message');
+        const conv = await Conversation.findOne({
+          $or: [
+            { transaction: transaction._id },
+            { request: transaction.request }
+          ]
+        });
+        if (conv) {
+          await Message.deleteMany({ conversation: conv._id });
+          await Conversation.findByIdAndUpdate(conv._id, {
+            status: 'CLOSED',
+            lastMessageText: '[Item Taken - Chat securely deleted from database]',
+            lastMessage: null
+          });
+          const { query: pgQuery } = require('../config/postgres');
+          await pgQuery('DELETE FROM messages WHERE conversation_id = $1', [conv._id.toString()]).catch(() => {});
+        }
+      } catch (delErr) {
+        console.warn('[Transaction Complete Message Clean Error]:', delErr.message);
+      }
     }
 
     await transaction.save();

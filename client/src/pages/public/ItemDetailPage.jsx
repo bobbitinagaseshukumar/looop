@@ -212,10 +212,14 @@ export const ItemDetailPage = () => {
       if (result && result.success) {
         setRequestModalOpen(false);
         addToast({
-          title: 'Request Submitted',
-          message: `Your request for "${item.title}" was submitted to ${item.owner?.name || 'the owner'}.`,
+          title: 'Request Sent Successfully!',
+          message: `Your details and location were emailed to ${item.owner?.name || 'the owner'}. Opening pickup coordination chat...`,
           variant: 'success'
         });
+        const reqId = result.request?._id || result.request?.id;
+        if (reqId) {
+          navigate(`/requests/${reqId}`);
+        }
       } else {
         throw new Error(result?.message || 'Failed to submit request to server.');
       }

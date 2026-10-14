@@ -28,6 +28,7 @@ import RequestStatusBadge from '../../components/requests/RequestStatusBadge';
 import RequestTimeline from '../../components/requests/RequestTimeline';
 import RequestItemCard from '../../components/requests/RequestItemCard';
 import RequestActions from '../../components/requests/RequestActions';
+import RapidoHandoverChatBox from '../../components/requests/RapidoHandoverChatBox';
 import { requestService } from '../../services/requestService';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../hooks/useToast';
@@ -578,6 +579,16 @@ export const RequestDetails = () => {
               </div>
             )}
           </Card>
+
+          {/* Rapido-Style Fast Handover & Pickup Coordination Chat */}
+          {(isOwner || isRequester) && (
+            <div style={{ marginBottom: '1.25rem' }}>
+              <RapidoHandoverChatBox
+                request={request}
+                onRequestUpdated={fetchRequest}
+              />
+            </div>
+          )}
 
           {/* 7. Request Message */}
           <Card style={{ padding: '1.5rem', border: '1px solid var(--color-slate-200)', borderRadius: 'var(--radius-lg)' }}>

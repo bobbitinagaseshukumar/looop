@@ -202,10 +202,21 @@ exports.getConversationByRequest = async (req, res) => {
       return res.status(403).json({ success: false, message: 'Access denied.' });
     }
 
-    if (request.status !== 'ACCEPTED' && request.status !== 'COMPLETED') {
+    if (request.status === 'DECLINED' || request.status === 'CANCELLED') {
       return res.status(400).json({
         success: false,
-        message: 'Conversation is only available for accepted requests.'
+        message: 'Conversation is not available for declined or cancelled requests.'
+      });
+    }
+
+    // If request is COMPLETED, the chat was concluded and deleted upon handover
+    if (request.status === 'COMPLETED') {
+      return res.status(200).json({
+        success: true,
+        closed: true,
+        isTaken: true,
+        message: 'Item has been taken! Handover complete and chat messages have been permanently deleted from the database.',
+        conversation: null
       });
     }
 

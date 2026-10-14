@@ -9,6 +9,7 @@ import {
   ArrowRight,
   UserPlus,
   MapPin,
+  Phone,
   ShieldCheck,
   Package,
   Layers
@@ -18,6 +19,7 @@ import Button from '../common/Button';
 import Badge from '../common/Badge';
 import { formatSharingType, formatCondition, formatLocation } from '../../utils/formatters';
 import { useAuth } from '../../context/AuthContext';
+import { useLocationContext } from '../../context/LocationContext';
 import { itemService } from '../../services/itemService';
 
 export const RequestItemModal = ({
@@ -29,9 +31,12 @@ export const RequestItemModal = ({
   error = null
 }) => {
   const { user, isAuthenticated } = useAuth();
+  const { location } = useLocationContext();
   const navigate = useNavigate();
 
   const [message, setMessage] = useState('');
+  const [requesterLocation, setRequesterLocation] = useState('');
+  const [requesterPhone, setRequesterPhone] = useState('');
   const [expectedReturnDate, setExpectedReturnDate] = useState('');
   const [offeredItemId, setOfferedItemId] = useState('');
   const [myItems, setMyItems] = useState([]);
@@ -39,6 +44,17 @@ export const RequestItemModal = ({
   const [validationError, setValidationError] = useState('');
 
   const isLoggedIn = !!(user && (isAuthenticated || user.id || user.email));
+
+  // Initialize requester location and contact from profile/context
+  useEffect(() => {
+    if (isOpen) {
+      const defaultLoc = (user?.locality && user?.city)
+        ? `${user.locality}, ${user.city}`
+        : (user?.city || (location?.city || location?.locality || 'Indiranagar, Bangalore'));
+      setRequesterLocation(defaultLoc);
+      setRequesterPhone(user?.phone || '');
+    }
+  }, [isOpen, user, location]);
 
   // Load user's own items if this is an exchange request
   useEffect(() => {
@@ -119,6 +135,8 @@ export const RequestItemModal = ({
       itemId: item.id || item._id,
       type: requestType,
       message: message.trim(),
+      location: requesterLocation.trim(),
+      phone: requesterPhone.trim(),
       expectedReturnDate: requestType === 'BORROW' ? expectedReturnDate : undefined,
       offeredItemId: requestType === 'EXCHANGE' ? offeredItemId : undefined
     });
@@ -378,6 +396,56 @@ export const RequestItemModal = ({
             )}
           </div>
         )}
+
+        {/* Requester Pickup Location & Contact (Dispatched to owner via email) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label htmlFor="requester-location" style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-800)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <MapPin size={15} color="#059669" />
+              <span>Your Location / Pickup Area (Sent to Owner)</span>
+            </label>
+            <input
+              id="requester-location"
+              type="text"
+              value={requesterLocation}
+              onChange={(e) => setRequesterLocation(e.target.value)}
+              placeholder="e.g. Indiranagar, Bangalore"
+              required
+              style={{
+                width: '100%',
+                padding: '9px 12px',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-slate-300)',
+                backgroundColor: '#ffffff',
+                color: 'var(--color-slate-900)',
+                fontSize: '0.875rem'
+              }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <label htmlFor="requester-phone" style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-slate-800)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Phone size={15} color="#059669" />
+              <span>Phone / Contact Number (Optional)</span>
+            </label>
+            <input
+              id="requester-phone"
+              type="tel"
+              value={requesterPhone}
+              onChange={(e) => setRequesterPhone(e.target.value)}
+              placeholder="e.g. 9876543210"
+              style={{
+                width: '100%',
+                padding: '9px 12px',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--color-slate-300)',
+                backgroundColor: '#ffffff',
+                color: 'var(--color-slate-900)',
+                fontSize: '0.875rem'
+              }}
+            />
+          </div>
+        </div>
 
         {/* Message to Owner */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

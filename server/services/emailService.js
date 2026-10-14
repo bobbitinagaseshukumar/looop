@@ -458,15 +458,38 @@ async function sendItemSharedEmail({ toEmail, recipientName, recipientUserId, it
   });
 }
 
-async function sendRequestReceivedEmail({ toEmail, recipientName, recipientUserId, requesterName, itemTitle, requestType, message }) {
+async function sendRequestReceivedEmail({
+  toEmail,
+  recipientName,
+  recipientUserId,
+  requesterName,
+  requesterEmail,
+  requesterPhone,
+  requesterLocation,
+  itemTitle,
+  requestType,
+  message,
+  requestId
+}) {
   return dispatchEmail({
     eventType: 'REQUEST_CREATED',
     recipientEmail: toEmail,
     recipientName,
     recipientUserId,
     templateKey: 'newRequestOwner',
-    templateData: { requesterName, itemTitle, requestType, message, appUrl: process.env.FRONTEND_URL || 'http://localhost:3000' },
-    isEssential: false,
+    templateData: {
+      name: recipientName,
+      requesterName,
+      requesterEmail,
+      requesterPhone,
+      requesterLocation,
+      itemTitle,
+      requestType,
+      message,
+      requestId,
+      appUrl: process.env.FRONTEND_URL || 'http://localhost:3000'
+    },
+    isEssential: true,
     category: 'requests'
   });
 }

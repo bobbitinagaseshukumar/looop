@@ -269,23 +269,35 @@ export const looopEmailTemplates = {
   }),
 
   // 7. Someone Requested Your Product
-  someoneRequested: ({ name = 'Mahesh', item = 'Scientific Calculator', requestedBy = 'Rahul', type = 'Borrow', requestUrl = 'https://loop-five-azure.vercel.app/dashboard' }) => ({
-    subject: 'Someone is interested in your item',
+  someoneRequested: ({
+    name = 'Owner',
+    item = 'Product',
+    requestedBy = 'Community Member',
+    requesterEmail = '',
+    requesterPhone = '',
+    requesterLocation = '',
+    type = 'Borrow',
+    requestUrl = 'https://loop-five-azure.vercel.app/dashboard'
+  }) => ({
+    subject: `Someone is interested in your item: ${item}`,
     html: buildLooopEmailHtml({
       headline: 'You received a new request',
       recipientName: name,
       bodyParagraphs: [
-        "Someone has requested an item you've shared on LOOOP."
+        `Someone has requested the item "${item}" you've shared on LOOOP. Below are their details and location to coordinate pickup.`
       ],
-      cardTitle: 'Request details',
+      cardTitle: 'Customer & Request details',
       cardRows: [
         { label: 'Item', value: item },
         { label: 'Requested by', value: requestedBy },
+        ...(requesterEmail ? [{ label: 'Customer Email', value: requesterEmail }] : []),
+        ...(requesterPhone ? [{ label: 'Customer Phone', value: requesterPhone }] : []),
+        ...(requesterLocation ? [{ label: 'Customer Location', value: requesterLocation }] : []),
         { label: 'Request type', value: type }
       ],
-      buttonText: 'View Request',
+      buttonText: 'Open Chat & Coordinate Handover',
       buttonUrl: requestUrl,
-      extraNote: 'The requester is waiting for your response.<br><br>You can accept or decline the request from your LOOOP dashboard.',
+      extraNote: 'A secure pickup coordination chat is active for this item. Once the item is taken / handed over, the temporary chat will be permanently closed and deleted from the database.',
       signoffTeam: '— The LOOOP Team'
     })
   }),

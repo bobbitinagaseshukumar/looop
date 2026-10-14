@@ -257,27 +257,48 @@ const looopEmailTemplates = {
     })
   }),
 
-  newRequestOwner: ({ name = 'Owner', requesterName = 'Community Member', itemTitle = 'Product', requestType = 'Reuse', message = '', appUrl = 'https://loop-five-azure.vercel.app' }) => ({
-    subject: `New Request for Your Product: ${itemTitle}`,
-    html: buildLooopEmailHtml({
-      headline: `New ${requestType} Request`,
-      recipientName: name,
-      bodyParagraphs: [
-        `You have received a new ${requestType.toLowerCase()} request on LOOOP.`
-      ],
-      cardTitle: 'REQUEST DETAILS',
-      cardRows: [
-        { label: 'Product', value: itemTitle },
-        { label: 'Requested By', value: requesterName },
-        { label: 'Request Type', value: requestType },
-        { label: 'Message', value: message || 'No custom message provided.' }
-      ],
-      buttonText: 'Review & Respond to Request',
-      buttonUrl: `${appUrl}/requests`,
-      extraNote: 'Please review and accept or decline this request promptly to coordinate the handover.',
-      signoffTeam: '— The LOOOP Team'
-    })
-  }),
+  newRequestOwner: ({
+    name = 'Owner',
+    requesterName = 'Community Member',
+    requesterEmail = '',
+    requesterPhone = '',
+    requesterLocation = '',
+    itemTitle = 'Product',
+    requestType = 'Reuse',
+    message = '',
+    requestId = '',
+    appUrl = 'https://loop-five-azure.vercel.app'
+  }) => {
+    const cardRows = [
+      { label: 'Product', value: itemTitle },
+      { label: 'Customer Name', value: requesterName },
+      ...(requesterEmail ? [{ label: 'Customer Email', value: requesterEmail }] : []),
+      ...(requesterPhone ? [{ label: 'Customer Phone', value: requesterPhone }] : []),
+      ...(requesterLocation ? [{ label: 'Customer Location', value: requesterLocation }] : []),
+      { label: 'Request Type', value: requestType },
+      { label: 'Message', value: message || 'I would like to get/reuse this item.' }
+    ];
+
+    const targetUrl = requestId ? `${appUrl}/requests/${requestId}` : `${appUrl}/requests`;
+
+    return {
+      subject: `New Request for "${itemTitle}" from ${requesterName} (Location: ${requesterLocation || 'Nearby'})`,
+      html: buildLooopEmailHtml({
+        headline: `Customer Wants Your Product!`,
+        recipientName: name,
+        bodyParagraphs: [
+          `Great news! A customer wants your shared product "${itemTitle}".`,
+          `Below are the customer's contact details and location so you can coordinate the pickup.`
+        ],
+        cardTitle: 'CUSTOMER & LOCATION DETAILS',
+        cardRows,
+        buttonText: 'Open Chat & Coordinate Handover',
+        buttonUrl: targetUrl,
+        extraNote: 'A secure pickup coordination chat is active for this item. Once the item is taken / handed over, the temporary chat will be permanently closed and deleted from the database for your privacy.',
+        signoffTeam: '— The LOOOP Team'
+      })
+    };
+  },
 
   requestAcceptedCustomer: ({ name = 'Member', ownerName = 'Owner', itemTitle = 'Product', appUrl = 'https://loop-five-azure.vercel.app' }) => ({
     subject: `Your request for "${itemTitle}" has been accepted!`,

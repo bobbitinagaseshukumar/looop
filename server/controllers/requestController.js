@@ -167,7 +167,7 @@ exports.createRequest = async (req, res) => {
 
       await newRequest.populate([
         { path: 'item', select: 'title images sharingType condition location' },
-        { path: 'requester', select: 'name avatar trustScore rating email' },
+        { path: 'requester', select: 'name avatar trustScore rating email phone city locality state' },
         { path: 'owner', select: 'name avatar trustScore rating email' },
         { path: 'offeredItem', select: 'title images condition' }
       ]);
@@ -208,16 +208,28 @@ exports.createRequest = async (req, res) => {
         console.warn('Initial chat setup warning:', chatErr.message);
       }
 
-      // Trigger transactional email to item owner via centralized emailService
+      // Determine customer location & contact details
+      const requesterLoc = req.body.location ||
+        (newRequest.requester?.locality && newRequest.requester?.city
+          ? `${newRequest.requester.locality}, ${newRequest.requester.city}`
+          : (newRequest.requester?.city || (item.location?.locality && item.location?.city ? `${item.location.locality}, ${item.location.city}` : 'Indiranagar, Bangalore')));
+      const requesterPhone = req.body.phone || newRequest.requester?.phone || '';
+      const requesterEmail = newRequest.requester?.email || '';
+
+      // Trigger transactional email to item owner via Brevo Email
       if (newRequest.owner?.email) {
         emailService.sendRequestReceivedEmail({
           toEmail: newRequest.owner.email,
           recipientName: newRequest.owner.name || 'Owner',
           recipientUserId: newRequest.owner._id || newRequest.owner.id,
           requesterName: newRequest.requester?.name || 'Community Member',
+          requesterEmail,
+          requesterPhone,
+          requesterLocation: requesterLoc,
           itemTitle: item.title,
           requestType: resolvedType === 'BORROW' ? 'Borrow' : 'Reuse',
-          message: trimmedMessage
+          message: trimmedMessage,
+          requestId: newRequest._id
         }).catch((e) => console.error('Email dispatch error:', e.message));
       }
 
@@ -821,5 +833,138 @@ exports.cancelRequest = async (req, res) => {
       success: false,
       message: 'Unable to cancel request.'
     });
+  }
+};
+
+/**
+ * 6. Mark Item as Taken & Permanently Delete Chat from Database
+ * Triggered when owner or requester confirms the item has been taken/handed over.
+ * Closes the chat and wipes all message records from MongoDB and Neon PostgreSQL.
+ */
+exports.markItemTaken = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user?.id || req.user?._id;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: 'Invalid request ID.' });
+    }
+
+    const request = await Request.findById(id).populate('item owner requester');
+    if (!request) {
+      return res.status(404).json({ success: false, message: 'Request not found.' });
+    }
+
+    // Verify user is owner or requester
+    const isOwner = request.owner && (request.owner._id || request.owner).toString() === userId.toString();
+    const isRequester = request.requester && (request.requester._id || request.requester).toString() === userId.toString();
+
+    if (!isOwner && !isRequester && req.user?.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Only the item owner or requester can mark this item as taken.'
+      });
+    }
+
+    if (request.status === 'COMPLETED') {
+      return res.status(200).json({
+        success: true,
+        message: 'This item is already marked as taken.',
+        request
+      });
+    }
+
+    // 1. Mark request as COMPLETED
+    request.status = 'COMPLETED';
+    request.completedAt = new Date();
+    await request.save();
+
+    // 2. Mark item as Unavailable and reused
+    if (request.item) {
+      const itemId = request.item._id || request.item;
+      await Item.findByIdAndUpdate(itemId, {
+        availability: 'Unavailable',
+        status: 'reused'
+      });
+
+      // Synchronize directly with Neon PostgreSQL
+      try {
+        const { query: pgQuery } = require('../config/postgres');
+        await pgQuery(
+          "UPDATE items SET availability = 'Unavailable', status = 'reused', updated_at = NOW() WHERE id = $1",
+          [itemId.toString()]
+        );
+      } catch (e) {
+        console.warn('[PostgreSQL Sync Warning]:', e.message);
+      }
+    }
+
+    // 3. Mark linked transaction as COMPLETED if present
+    if (request.transaction) {
+      await Transaction.findByIdAndUpdate(request.transaction, {
+        status: 'COMPLETED',
+        completedAt: new Date(),
+        handoverConfirmedByOwner: true,
+        handoverConfirmedByRecipient: true
+      });
+    }
+
+    // 4. PERMANENTLY DELETE ALL CHAT MESSAGES FROM DATABASE FOR PRIVACY
+    let convId = request.conversation;
+    if (!convId) {
+      const conv = await Conversation.findOne({ request: request._id });
+      if (conv) convId = conv._id;
+    }
+
+    if (convId) {
+      // Delete from MongoDB
+      const Message = require('../models/Message');
+      const delRes = await Message.deleteMany({ conversation: convId });
+      console.log(`[Item Taken] Cleared ${delRes.deletedCount} chat messages from MongoDB for conversation ${convId}`);
+
+      // Delete from Neon PostgreSQL
+      try {
+        const { query: pgQuery } = require('../config/postgres');
+        await pgQuery('DELETE FROM messages WHERE conversation_id = $1', [convId.toString()]);
+        await pgQuery('DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE request_id = $1)', [request._id.toString()]);
+        await pgQuery("UPDATE conversations SET status = 'CLOSED', last_message_text = '[Item Taken - Chat securely deleted]' WHERE id = $1 OR request_id = $2", [convId.toString(), request._id.toString()]);
+      } catch (pgErr) {
+        console.warn('[PostgreSQL Delete Messages Warning]:', pgErr.message);
+      }
+
+      // Close conversation record in MongoDB
+      await Conversation.findByIdAndUpdate(convId, {
+        status: 'CLOSED',
+        lastMessageText: '[Item Taken - Chat securely deleted from database]',
+        lastMessage: null
+      });
+
+      // Real-time socket broadcast to close chat on all open screens
+      try {
+        const { getIO } = require('../sockets');
+        const io = getIO();
+        if (io) {
+          io.to(`conversation:${convId}`).emit('item_taken', {
+            requestId: request._id,
+            conversationId: convId,
+            message: 'Item has been taken! Handover complete and chat messages have been permanently deleted.'
+          });
+        }
+      } catch (sockErr) {
+        console.warn('[Socket Warning]:', sockErr.message);
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: 'Item successfully marked as taken! Handover complete and chat messages have been permanently deleted from the database.',
+      request: {
+        ...request.toObject(),
+        id: request._id
+      }
+    });
+  } catch (error) {
+    console.error('Error in markItemTaken:', error);
+    return res.status(500).json({ success: false, message: 'Failed to mark item as taken.' });
   }
 };

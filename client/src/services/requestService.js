@@ -76,6 +76,16 @@ export const requestService = {
   },
 
   /**
+   * Mark item as taken, complete handover, and wipe chat history from database
+   * @param {string} id
+   * @returns {Promise<Object>}
+   */
+  markItemTaken: async (id) => {
+    const response = await api.patch(`/requests/${id}/taken`);
+    return response.data;
+  },
+
+  /**
    * Fetch recent requests for dashboard preview
    */
   getRecentRequests: async () => {
