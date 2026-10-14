@@ -170,6 +170,7 @@ export function hasCachedBrowseItems(queryKey = '') {
  * Handles discovery, nearby items, and category listings
  */
 export const itemService = {
+  isMockItem,
   getCachedItems,
   setCachedItems,
   getCachedBrowseItems,
