@@ -18,6 +18,11 @@ const AdminSetting = require('../models/AdminSetting');
  */
 async function seedDemoData() {
   try {
+    if (!mongoose.connection || mongoose.connection.readyState !== 1) {
+      console.log('[DemoSeeder] MongoDB is not active; PostgreSQL is active as the primary database. Skipping Mongo seeding.');
+      return;
+    }
+
     console.log('[DemoSeeder] Running idempotent demo seeding check...');
 
     // 1. Ensure Demo Admin Account exists

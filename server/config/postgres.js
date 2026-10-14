@@ -15,7 +15,10 @@ const DEFAULT_NEON_URL = 'postgresql://neondb_owner:npg_PzhnYria0G2e@ep-small-wi
  * Build PostgreSQL Connection Pool Configuration
  */
 const getPoolConfig = () => {
-  const connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URI || process.env.POSTGRESQL_URL || DEFAULT_NEON_URL;
+  let connectionString = process.env.DATABASE_URL || process.env.POSTGRES_URI || process.env.POSTGRESQL_URL || DEFAULT_NEON_URL;
+  if (connectionString && typeof connectionString === 'string' && connectionString.includes('sslmode=require')) {
+    connectionString = connectionString.replace('sslmode=require', 'sslmode=verify-full');
+  }
 
   if (connectionString) {
     const isSslRequired = process.env.DATABASE_SSL === 'true' || 
