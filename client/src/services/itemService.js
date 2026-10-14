@@ -8,25 +8,16 @@ const LOCAL_SHARED_ITEMS_KEY = 'looop_community_shared_items';
 export function isMockItem(item) {
   if (!item) return false;
   const id = String(item.id || item._id || '');
-  const title = String(item.title || '');
-  if (id.startsWith('itm_realme_') || id === 'itm_002' || id === 'itm_003' || id === 'itm_004' || id === 'itm_005' || id === 'itm_006' || id === 'itm_007' || id === 'itm_008') return true;
-  if (title.includes('Realme 12+') || title.includes('Modern Ergonomic Chair') || title.includes('Casio FX-991ES')) return true;
-  return false;
+  // STRICT: Only filter the exact legacy hardcoded mock IDs (never filter real products by title)
+  return id === 'itm_realme_1791465161247' || id === 'itm_002';
 }
 
-// Clean old mock items from local storage caches
+// Clean old caches from local storage
 try {
   localStorage.removeItem('looop_instant_products_cache_v1');
   localStorage.removeItem('looop_instant_products_cache_v2');
   localStorage.removeItem('looop_instant_products_cache_v3');
-  const stored = localStorage.getItem(LOCAL_SHARED_ITEMS_KEY);
-  if (stored) {
-    const list = JSON.parse(stored);
-    if (Array.isArray(list)) {
-      const clean = list.filter((i) => !isMockItem(i));
-      localStorage.setItem(LOCAL_SHARED_ITEMS_KEY, JSON.stringify(clean));
-    }
-  }
+  localStorage.removeItem('looop_instant_products_cache_v4');
 } catch {}
 
 export function getLocalSharedItems() {
@@ -75,7 +66,7 @@ export function normalizeImageUrl(img) {
   return urlStr;
 }
 
-const INSTANT_CACHE_KEY = 'looop_instant_products_cache_v4';
+const INSTANT_CACHE_KEY = 'looop_instant_products_cache_v5';
 const BROWSE_CACHE_KEY_PREFIX = 'looop_browse_cache_';
 let memoryItemsCache = null;
 const memoryBrowseCache = new Map();
