@@ -315,6 +315,33 @@ exports.createItem = async (req, res) => {
 
     // 7. Save item into Neon PostgreSQL Database Backend
     let pgSavedItem = null;
+    const baseParams = [
+      neonItemId,
+      title.trim().substring(0, 120),
+      description.trim(),
+      category.toLowerCase().substring(0, 60),
+      (subcategory ? subcategory.trim() : 'General').substring(0, 60),
+      (brand ? brand.trim() : '').substring(0, 60),
+      (model ? model.trim() : '').substring(0, 60),
+      JSON.stringify(formattedImages),
+      normalizedSharingType.substring(0, 20),
+      normalizedCondition.substring(0, 30),
+      'Available',
+      'active',
+      (locationObj.city || '').substring(0, 100),
+      (locationObj.district || '').substring(0, 100),
+      (locationObj.state || '').substring(0, 100),
+      (locationObj.locality || '').substring(0, 100),
+      (locationObj.approximateAddress || '').substring(0, 255),
+      lat,
+      lng,
+      borrowMaxDays,
+      (borrowMaxUnit || 'days').substring(0, 20),
+      borrowNotesStr.substring(0, 500),
+      exchangeWantedStr.substring(0, 300)
+    ];
+
+    // First attempt: include specifications column
     try {
       const pgRes = await pgQuery(
         `INSERT INTO items (
@@ -330,40 +357,44 @@ exports.createItem = async (req, res) => {
           $21, $22, $23, $24::jsonb,
           $25, 0, 0, NOW(), NOW()
         ) RETURNING *;`,
-        [
-          neonItemId,
-          title.trim().substring(0, 120),
-          description.trim(),
-          category.toLowerCase().substring(0, 60),
-          (subcategory ? subcategory.trim() : 'General').substring(0, 60),
-          (brand ? brand.trim() : '').substring(0, 60),
-          (model ? model.trim() : '').substring(0, 60),
-          JSON.stringify(formattedImages),
-          normalizedSharingType.substring(0, 20),
-          normalizedCondition.substring(0, 30),
-          'Available',
-          'active',
-          (locationObj.city || '').substring(0, 100),
-          (locationObj.district || '').substring(0, 100),
-          (locationObj.state || '').substring(0, 100),
-          (locationObj.locality || '').substring(0, 100),
-          (locationObj.approximateAddress || '').substring(0, 255),
-          lat,
-          lng,
-          borrowMaxDays,
-          (borrowMaxUnit || 'days').substring(0, 20),
-          borrowNotesStr.substring(0, 500),
-          exchangeWantedStr.substring(0, 300),
-          JSON.stringify(normalizedSpecifications),
-          resolvedOwnerId
-        ]
+        [...baseParams, JSON.stringify(normalizedSpecifications), resolvedOwnerId]
       );
       if (pgRes?.rows?.[0]) {
         pgSavedItem = pgRes.rows[0];
-        console.log(`[Neon PostgreSQL] Item successfully saved with ID: ${pgSavedItem.id} for owner: ${resolvedOwnerId}`);
       }
     } catch (pgErr) {
-      console.error('[Neon PostgreSQL] Error saving item:', pgErr.message);
+      console.warn('[Neon PostgreSQL] Insert with specifications failed:', pgErr.message);
+    }
+
+    // Fallback: retry without specifications if the column doesn't exist yet
+    if (!pgSavedItem) {
+      try {
+        const pgRes = await pgQuery(
+          `INSERT INTO items (
+            id, title, description, category, subcategory, brand, model, images,
+            sharing_type, condition, availability, status, city, district, state,
+            locality, approximate_address, latitude, longitude, borrow_max_duration_days,
+            borrow_max_duration_unit, borrow_notes, exchange_wanted_items, owner_id,
+            views_count, saves_count, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8::jsonb,
+            $9, $10, $11, $12, $13, $14, $15,
+            $16, $17, $18, $19, $20,
+            $21, $22, $23, $24,
+            0, 0, NOW(), NOW()
+          ) RETURNING *;`,
+          [...baseParams, resolvedOwnerId]
+        );
+        if (pgRes?.rows?.[0]) {
+          pgSavedItem = pgRes.rows[0];
+        }
+      } catch (pgErr) {
+        console.error('[Neon PostgreSQL] Error saving item:', pgErr.message);
+      }
+    }
+
+    if (pgSavedItem) {
+      console.log(`[Neon PostgreSQL] Item successfully saved with ID: ${pgSavedItem.id} for owner: ${resolvedOwnerId}`);
     }
 
     // 8. Invalidate admin profile and admin dashboard caches so numbers update/increment instantly
