@@ -53,6 +53,11 @@ export const apiClient = axios.create({
 // Request Interceptor: inject stored JWT token if present
 apiClient.interceptors.request.use(
   (config) => {
+    // Let browser and Axios compute boundary for FormData uploads
+    if (config.data instanceof FormData) {
+      delete config.headers['Content-Type'];
+    }
+
     if (typeof window !== 'undefined') {
       const token = localStorage.getItem('looop_token');
       if (token) {

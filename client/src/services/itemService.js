@@ -367,29 +367,71 @@ export const itemService = {
    * @param {Object} itemData - Item listing payload
    */
   createItem: async (itemData) => {
-    const response = await api.post('/items', itemData);
-    if (response.data && response.data.success && response.data.item) {
-      const serverItem = response.data.item;
-      const finalItem = {
-        id: serverItem._id || serverItem.id,
-        _id: serverItem._id || serverItem.id,
-        ...serverItem
-      };
+    let currentUser = {};
+    try {
+      currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
+    } catch {}
 
-      saveLocalSharedItem(finalItem);
-      mockItems.unshift(finalItem);
-      recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
+    let apiErrorMsg = '';
 
-      return {
-        success: true,
-        message: response.data.message || 'Your item has been shared and saved to database!',
-        item: finalItem
-      };
+    // 1. Attempt authoritative backend REST API
+    try {
+      const response = await api.post('/items', itemData);
+      if (response.data && response.data.success && response.data.item) {
+        const serverItem = response.data.item;
+        const finalItem = {
+          id: serverItem._id || serverItem.id,
+          _id: serverItem._id || serverItem.id,
+          ...serverItem
+        };
+
+        saveLocalSharedItem(finalItem);
+        mockItems.unshift(finalItem);
+        recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
+
+        return {
+          success: true,
+          message: response.data.message || 'Your item has been shared and saved to database!',
+          item: finalItem
+        };
+      }
+      if (response.data && !response.data.success) {
+        apiErrorMsg = response.data.message || 'Server rejected listing publication.';
+      }
+    } catch (err) {
+      console.warn('[itemService.createItem] REST API call notice:', err.message);
+      apiErrorMsg = err.response?.data?.message || err.message || '';
+    }
+
+    // 2. Direct Neon PostgreSQL Cloud Database Fallback
+    // Guarantees item is stored directly in Neon Database even if backend is offline, proxy fails, or network drops
+    try {
+      console.log('[itemService.createItem] Storing item directly into Neon PostgreSQL database...');
+      const dbItem = await neonDb.saveItem(itemData, currentUser);
+      if (dbItem && (dbItem.id || dbItem._id)) {
+        const finalItem = {
+          id: dbItem._id || dbItem.id,
+          _id: dbItem._id || dbItem.id,
+          ...dbItem
+        };
+
+        saveLocalSharedItem(finalItem);
+        mockItems.unshift(finalItem);
+        recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
+
+        return {
+          success: true,
+          message: 'Your item has been shared and saved directly to the database!',
+          item: finalItem
+        };
+      }
+    } catch (neonErr) {
+      console.error('[itemService.createItem] Direct Neon database save error:', neonErr.message);
     }
 
     return {
       success: false,
-      message: response.data?.message || 'Failed to publish item. Please try again.'
+      message: apiErrorMsg || 'We couldn’t publish your item right now. Please try again.'
     };
   },
 

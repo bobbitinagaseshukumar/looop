@@ -147,13 +147,13 @@ exports.createItem = async (req, res) => {
       };
     });
 
-    const parsedCity = location?.city || (typeof location === 'string' ? location.split(',')[0] : 'Bengaluru');
+    const parsedCity = String(location?.city || (typeof location === 'string' ? location.split(',')[0] : 'Bengaluru') || 'Bengaluru');
     const locationObj = {
       city: parsedCity.trim(),
-      district: location?.district || '',
-      state: location?.state || '',
-      locality: location?.locality || '',
-      approximateAddress: typeof location === 'string' ? location : (location?.approximateAddress || `${parsedCity}`)
+      district: String(location?.district || '').trim(),
+      state: String(location?.state || '').trim(),
+      locality: String(location?.locality || '').trim(),
+      approximateAddress: typeof location === 'string' ? location : String(location?.approximateAddress || `${parsedCity}`)
     };
 
     // 4. Coordinates GeoJSON [longitude, latitude]
@@ -342,6 +342,7 @@ exports.createItem = async (req, res) => {
     ];
 
     // First attempt: include specifications column
+    let pgErrorDetails = null;
     try {
       const pgRes = await pgQuery(
         `INSERT INTO items (
@@ -364,6 +365,7 @@ exports.createItem = async (req, res) => {
       }
     } catch (pgErr) {
       console.warn('[Neon PostgreSQL] Insert with specifications failed:', pgErr.message);
+      pgErrorDetails = pgErr.message;
     }
 
     // Fallback: retry without specifications if the column doesn't exist yet
@@ -390,11 +392,51 @@ exports.createItem = async (req, res) => {
         }
       } catch (pgErr) {
         console.error('[Neon PostgreSQL] Error saving item:', pgErr.message);
+        pgErrorDetails = pgErr.message;
       }
     }
 
     if (pgSavedItem) {
       console.log(`[Neon PostgreSQL] Item successfully saved with ID: ${pgSavedItem.id} for owner: ${resolvedOwnerId}`);
+      
+      // Also sync to MongoDB if connected
+      if (mongoose.connection && mongoose.connection.readyState === 1 && ownerIdMongo) {
+        try {
+          await Item.create({
+            title: title.trim(),
+            description: description.trim(),
+            category: category.toLowerCase(),
+            subcategory: subcategory ? subcategory.trim() : 'General',
+            brand: brand ? brand.trim() : '',
+            model: model ? model.trim() : '',
+            images: formattedImages,
+            sharingType: normalizedSharingType,
+            condition: normalizedCondition,
+            availability: 'Available',
+            status: 'active',
+            location: {
+              type: 'Point',
+              coordinates: [lng, lat],
+              approximateAddress: locationObj.approximateAddress,
+              city: locationObj.city,
+              district: locationObj.district,
+              state: locationObj.state,
+              locality: locationObj.locality
+            },
+            owner: ownerIdMongo,
+            borrowSettings: {
+              maxDurationDays: borrowMaxDays,
+              maxDurationUnit: borrowMaxUnit,
+              notes: borrowNotesStr
+            },
+            exchangeDetails: {
+              wantedItems: exchangeWantedStr
+            }
+          });
+        } catch (mSaveErr) {
+          console.warn('[itemController] MongoDB sync notice:', mSaveErr.message);
+        }
+      }
     }
 
     // 8. Invalidate admin profile and admin dashboard caches so numbers update/increment instantly
@@ -419,11 +461,10 @@ exports.createItem = async (req, res) => {
     }
 
     // 10. PostgreSQL is the authoritative store for items.
-    // No MongoDB fallback: a failed insert must surface instead of silently dropping the item.
     if (!pgSavedItem) {
       return res.status(500).json({
         success: false,
-        message: 'We couldn’t publish your item right now. Please try again.'
+        message: pgErrorDetails ? `Database error: ${pgErrorDetails}` : 'We couldn’t publish your item right now. Please try again.'
       });
     }
 

@@ -92,6 +92,7 @@ export const ShareItemPage = () => {
   // Multi-Step & Validation State
   const [currentStep, setCurrentStep] = useState(1);
   const [formStatus, setFormStatus] = useState('idle'); // idle | submitting | success | error
+  const [errorMessage, setErrorMessage] = useState('');
   const [createdItem, setCreatedItem] = useState(null);
   const [errors, setErrors] = useState({});
   const [touched, setTouched] = useState({});
@@ -492,6 +493,7 @@ export const ShareItemPage = () => {
         setIsDirty(false);
         setCreatedItem(response.item);
         setFormStatus('success');
+        setErrorMessage('');
 
         addToast({
           title: 'Listing Published!',
@@ -499,14 +501,23 @@ export const ShareItemPage = () => {
           variant: 'success'
         });
       } else {
+        const msg = response?.message || 'We couldn’t publish your item right now. Please try again.';
+        setErrorMessage(msg);
         setFormStatus('error');
+        addToast({
+          title: 'Could Not Publish',
+          message: msg,
+          variant: 'danger'
+        });
       }
     } catch (err) {
       console.error('Publish item error:', err);
+      const msg = err?.message || 'We couldn’t publish your item right now. Please try again.';
+      setErrorMessage(msg);
       setFormStatus('error');
       addToast({
         title: 'Could Not Publish',
-        message: 'We couldn’t publish your item right now. Please try again.',
+        message: msg,
         variant: 'danger'
       });
     }
@@ -634,7 +645,7 @@ export const ShareItemPage = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <AlertTriangle size={18} />
             <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>
-              We couldn’t publish your item right now. Your entered data is preserved.
+              {errorMessage || 'We couldn’t publish your item right now. Your entered data is preserved.'}
             </span>
           </div>
           <Button size="sm" variant="primary" onClick={handleSubmit}>
