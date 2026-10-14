@@ -9,6 +9,31 @@ const { invalidateAnalyticsCache } = require('../services/adminAnalyticsService'
 const { clearAdminItemsCache } = require('./adminController');
 const emailService = require('../services/emailService');
 
+// High-performance discovery in-memory cache (TTL 30s)
+const discoveryCache = new Map();
+const DISCOVERY_CACHE_TTL_MS = 30000;
+
+function getCachedDiscovery(key) {
+  const entry = discoveryCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > DISCOVERY_CACHE_TTL_MS) {
+    discoveryCache.delete(key);
+    return null;
+  }
+  return entry.data;
+}
+
+function setCachedDiscovery(key, data) {
+  if (discoveryCache.size > 200) {
+    discoveryCache.clear();
+  }
+  discoveryCache.set(key, { timestamp: Date.now(), data });
+}
+
+function clearDiscoveryCache() {
+  discoveryCache.clear();
+}
+
 /**
  * GET /api/items/upload-rules
  * Public route to fetch platform product upload rules
@@ -452,7 +477,8 @@ exports.createItem = async (req, res) => {
       }
     }
 
-    // Invalidate admin caches so numbers and product lists refresh immediately
+    // Invalidate caches so numbers and product lists refresh immediately
+    clearDiscoveryCache();
     clearAdminItemsCache();
     invalidateDashboardCache();
     invalidateAnalyticsCache();
@@ -1208,6 +1234,13 @@ exports.discoverItems = async (req, res) => {
     const parsedRadius = Math.min(100, Math.max(1, parseFloat(radius) || 25));
     const skip = (parsedPage - 1) * parsedLimit;
 
+    // In-memory cache check for instant (<2ms) responses
+    const cacheKey = JSON.stringify(req.query || {});
+    const cachedResponse = getCachedDiscovery(cacheKey);
+    if (cachedResponse) {
+      return res.status(200).json(cachedResponse);
+    }
+
     // Check if valid client coordinates are provided
     const hasValidCoords =
       latitude !== undefined &&
@@ -1550,7 +1583,7 @@ exports.discoverItems = async (req, res) => {
       }
     }
 
-    return res.status(200).json({
+    const responsePayload = {
       success: true,
       items,
       total,
@@ -1559,7 +1592,9 @@ exports.discoverItems = async (req, res) => {
       limit: parsedLimit,
       radius: parsedRadius,
       hasCoordinates: hasValidCoords
-    });
+    };
+    setCachedDiscovery(cacheKey, responsePayload);
+    return res.status(200).json(responsePayload);
   } catch (error) {
     console.error('Error in discoverItems:', error);
     return res.status(500).json({

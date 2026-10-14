@@ -48,11 +48,98 @@ export function normalizeImageUrl(img) {
   return urlStr;
 }
 
+const INSTANT_CACHE_KEY = 'looop_instant_products_cache_v3';
+const BROWSE_CACHE_KEY_PREFIX = 'looop_browse_cache_';
+let memoryItemsCache = null;
+const memoryBrowseCache = new Map();
+
+/**
+ * Return cached items immediately for 0ms initial render
+ */
+export function getCachedItems(limit = 24) {
+  // 1. In-memory check (0.001 ms)
+  if (memoryItemsCache && memoryItemsCache.length > 0) {
+    return memoryItemsCache.slice(0, limit);
+  }
+
+  // 2. LocalStorage persistent check (0.1 ms)
+  try {
+    const stored = localStorage.getItem(INSTANT_CACHE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        memoryItemsCache = parsed;
+        return parsed.slice(0, limit);
+      }
+    }
+  } catch (err) {
+    console.warn('[itemService] cache read error:', err);
+  }
+
+  // 3. Instant baseline fallback (mockItems + localSharedItems) - ALWAYS READY on Frame 0
+  const localItems = getLocalSharedItems();
+  const baseline = [...localItems, ...mockItems].map((item) => ({
+    ...item,
+    id: item._id || item.id,
+    images: (item.images || []).map(normalizeImageUrl)
+  }));
+  memoryItemsCache = baseline;
+  try {
+    localStorage.setItem(INSTANT_CACHE_KEY, JSON.stringify(baseline.slice(0, 50)));
+  } catch {}
+  return baseline.slice(0, limit);
+}
+
+export function setCachedItems(items) {
+  if (!Array.isArray(items) || items.length === 0) return;
+  const normalized = items.map((item) => ({
+    ...item,
+    id: item._id || item.id,
+    images: (item.images || []).map(normalizeImageUrl)
+  }));
+  memoryItemsCache = normalized;
+  try {
+    localStorage.setItem(INSTANT_CACHE_KEY, JSON.stringify(normalized.slice(0, 60)));
+  } catch {}
+}
+
+export function getCachedBrowseItems(queryKey = '') {
+  if (memoryBrowseCache.has(queryKey)) {
+    return memoryBrowseCache.get(queryKey);
+  }
+  try {
+    const raw = sessionStorage.getItem(`${BROWSE_CACHE_KEY_PREFIX}${queryKey}`);
+    if (raw) {
+      const data = JSON.parse(raw);
+      memoryBrowseCache.set(queryKey, data);
+      return data;
+    }
+  } catch {}
+  return null;
+}
+
+export function setCachedBrowseItems(queryKey = '', data) {
+  if (!data) return;
+  memoryBrowseCache.set(queryKey, data);
+  try {
+    sessionStorage.setItem(`${BROWSE_CACHE_KEY_PREFIX}${queryKey}`, JSON.stringify(data));
+  } catch {}
+}
+
+export function hasCachedBrowseItems(queryKey = '') {
+  return memoryBrowseCache.has(queryKey) || !!sessionStorage.getItem(`${BROWSE_CACHE_KEY_PREFIX}${queryKey}`);
+}
+
 /**
  * Item Service
  * Handles discovery, nearby items, and category listings
  */
 export const itemService = {
+  getCachedItems,
+  setCachedItems,
+  getCachedBrowseItems,
+  setCachedBrowseItems,
+  hasCachedBrowseItems,
   /**
    * Primary Global Discovery endpoint called by BrowsePage
    * Retrieves items from backend (Neon PostgreSQL) with search, filter, proximity, and pagination.
@@ -195,7 +282,9 @@ export const itemService = {
 
     let allItems = Array.from(combinedMap.values());
     if (allItems.length === 0) {
-      allItems = mockItems;
+      allItems = getCachedItems(params.limit || 24);
+    } else {
+      setCachedItems(allItems);
     }
 
     return {

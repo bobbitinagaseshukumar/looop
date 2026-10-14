@@ -44,7 +44,8 @@ import AmazonItemCarousel from '../../components/home/AmazonItemCarousel';
 export const LandingPage = () => {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [showAuthModal, setShowAuthModal] = useState(false);
-  const [realItems, setRealItems] = useState([]);
+  // Instant zero-millisecond render from cache (never flashes empty or reloads from scratch)
+  const [realItems, setRealItems] = useState(() => itemService.getCachedItems(24));
   const [liveImpact, setLiveImpact] = useState(() => getLiveImpactMetrics());
   const { user, isAuthenticated } = useAuth();
   const navigate = useNavigate();
@@ -54,11 +55,17 @@ export const LandingPage = () => {
     const fetchItems = async () => {
       try {
         const res = await itemService.getItems({ limit: 24 });
-        if (isMounted && res?.items) {
-          setRealItems(res.items);
+        if (isMounted && res?.items && res.items.length > 0) {
+          // Compare IDs so we don't trigger unnecessary re-renders if identical
+          setRealItems((prev) => {
+            if (!prev || prev.length === 0) return res.items;
+            const prevIds = prev.map((i) => i.id || i._id).join(',');
+            const newIds = res.items.map((i) => i.id || i._id).join(',');
+            return prevIds === newIds ? prev : res.items;
+          });
           const metrics = getLiveImpactMetrics();
-          const books = res.items.filter(i => (i.category || '').toLowerCase() === 'books').length;
-          const electronics = res.items.filter(i => (i.category || '').toLowerCase() === 'electronics').length;
+          const books = res.items.filter((i) => (i.category || '').toLowerCase() === 'books').length;
+          const electronics = res.items.filter((i) => (i.category || '').toLowerCase() === 'electronics').length;
           setLiveImpact({
             itemsReused: Math.max(metrics.itemsReused, res.items.length),
             peopleHelped: Math.max(metrics.peopleHelped, res.items.length > 0 ? 1 : 0),
@@ -68,7 +75,7 @@ export const LandingPage = () => {
           });
         }
       } catch (err) {
-        console.warn('Failed to load items for homepage:', err);
+        console.warn('Silent background item sync notice:', err);
       }
     };
     fetchItems();

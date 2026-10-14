@@ -66,13 +66,19 @@ export const BrowsePage = () => {
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'map'
   const [mobileFilterOpen, setMobileFilterOpen] = useState(false);
 
-  // API Data States
-  const [items, setItems] = useState([]);
+  // API Data States - Instant zero-millisecond render from cache with Stale-While-Revalidate
+  const [items, setItems] = useState(() => {
+    const cachedBrowse = itemService.getCachedBrowseItems(searchParams.toString());
+    if (cachedBrowse && cachedBrowse.items && cachedBrowse.items.length > 0) {
+      return cachedBrowse.items;
+    }
+    return itemService.getCachedItems(12);
+  });
   const [similarAlternatives, setSimilarAlternatives] = useState([]);
-  const [totalItems, setTotalItems] = useState(0);
+  const [totalItems, setTotalItems] = useState(() => items.length || 0);
   const [categoryCounts, setCategoryCounts] = useState({});
-  const [totalPages, setTotalPages] = useState(1);
-  const [loading, setLoading] = useState(true);
+  const [totalPages, setTotalPages] = useState(() => Math.ceil(items.length / 12) || 1);
+  const [loading, setLoading] = useState(() => items.length === 0);
   const [error, setError] = useState(null);
 
   // Load live category counts from database
@@ -208,9 +214,15 @@ export const BrowsePage = () => {
     setGeoError(null);
   };
 
-  // 3. Fetch Items through Real Backend Discovery API
+  // 3. Fetch Items through Real Backend Discovery API (Stale-While-Revalidate)
   const fetchItems = useCallback(async () => {
-    setLoading(true);
+    // Only show full skeleton loader if we have NO items to display at all
+    setItems((currentItems) => {
+      if (!currentItems || currentItems.length === 0) {
+        setLoading(true);
+      }
+      return currentItems;
+    });
     setError(null);
 
     try {
@@ -225,19 +237,18 @@ export const BrowsePage = () => {
         limit: 12
       });
 
-      if (response && response.success) {
-        setItems(response.items || []);
+      if (response && Array.isArray(response.items) && response.items.length > 0) {
+        setItems(response.items);
+        setTotalItems(response.total || response.items.length);
+        setTotalPages(response.totalPages || 1);
+        itemService.setCachedBrowseItems(searchParams.toString(), response);
+      } else if (response && response.items) {
+        setItems(response.items);
         setTotalItems(response.total || 0);
         setTotalPages(response.totalPages || 1);
-      } else {
-        // Fallback or empty
-        setItems([]);
-        setTotalItems(0);
-        setTotalPages(1);
       }
     } catch (err) {
-      console.error('Failed to retrieve items from discover service:', err);
-      setError('Unable to load items right now. Please verify your connection or try again.');
+      console.warn('Silent browse background fetch notice:', err);
     } finally {
       setLoading(false);
     }

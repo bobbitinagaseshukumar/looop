@@ -4,8 +4,10 @@ import { ArrowRight, Sparkles, MapPin } from 'lucide-react';
 import Button from '../common/Button';
 import Badge from '../common/Badge';
 import { formatLocation } from '../../utils/formatters';
+import { itemService } from '../../services/itemService';
 
 export const AmazonItemCarousel = ({ items = [] }) => {
+  const displayItems = items && items.length > 0 ? items : itemService.getCachedItems(12);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const carouselRef = useRef(null);
@@ -29,7 +31,7 @@ export const AmazonItemCarousel = ({ items = [] }) => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const totalItems = items.length;
+  const totalItems = displayItems.length;
   const maxIndex = Math.max(0, totalItems - itemsPerPage);
 
   // Automatic smooth infinite rotation timer (scrolls automatically every 3 seconds)
@@ -61,7 +63,7 @@ export const AmazonItemCarousel = ({ items = [] }) => {
     }
   };
 
-  if (!items || items.length === 0) return null;
+  if (!displayItems || displayItems.length === 0) return null;
 
   return (
     <section
@@ -128,7 +130,7 @@ export const AmazonItemCarousel = ({ items = [] }) => {
               justifyContent: totalItems <= 2 ? 'flex-start' : 'initial'
             }}
           >
-            {items.map((item) => {
+            {displayItems.map((item) => {
               const itemImg = Array.isArray(item.images) && item.images.length > 0
                 ? (typeof item.images[0] === 'string' ? item.images[0] : item.images[0].url)
                 : 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
