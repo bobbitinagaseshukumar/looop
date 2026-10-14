@@ -21,17 +21,27 @@ import { BarDistributionChart } from '../../components/admin/SimpleChart';
 import StatusBadge from '../../components/admin/StatusBadge';
 import Spinner from '../../components/common/Spinner';
 
+// Module-scoped persistent cache that survives React Router unmount/remount
+let persistentDashboardData = null;
+let dashboardAlreadyLoaded = false;
+
 export const AdminDashboard = () => {
   const [range, setRange] = useState('30d');
   const [data, setData] = useState(() => {
+    if (persistentDashboardData) return persistentDashboardData;
     try {
       const cached = localStorage.getItem('looop_admin_dashboard_cache');
-      return cached ? JSON.parse(cached) : null;
-    } catch {
-      return null;
-    }
+      const parsed = cached ? JSON.parse(cached) : null;
+      if (parsed) {
+        persistentDashboardData = parsed;
+        dashboardAlreadyLoaded = true;
+        return parsed;
+      }
+    } catch {}
+    return null;
   });
   const [isLoading, setIsLoading] = useState(() => {
+    if (dashboardAlreadyLoaded || persistentDashboardData) return false;
     try {
       return !localStorage.getItem('looop_admin_dashboard_cache');
     } catch {
@@ -48,13 +58,15 @@ export const AdminDashboard = () => {
       const payload = res?.success && res?.data ? res.data : (res?.data || (res?.metrics ? res : null));
       if (payload) {
         setData(payload);
+        persistentDashboardData = payload;
+        dashboardAlreadyLoaded = true;
         try {
           localStorage.setItem('looop_admin_dashboard_cache', JSON.stringify(payload));
         } catch {}
       }
     } catch (err) {
       console.error('Failed to load dashboard:', err);
-      if (!data) {
+      if (!data && !persistentDashboardData) {
         setError('Unable to load real dashboard statistics. Please ensure the backend is running.');
       }
     } finally {
@@ -63,7 +75,11 @@ export const AdminDashboard = () => {
   };
 
   useEffect(() => {
-    // If cached data is present, fetch silently in background without showing loading dots
+    if (dashboardAlreadyLoaded && persistentDashboardData) {
+      // STRICTLY DO NOT RELOAD OR SHOW SKELETONS WHEN RETURNING TO THIS SECTION
+      setIsLoading(false);
+      return;
+    }
     const hasCache = !!data;
     fetchDashboard(range, hasCache);
   }, [range]);

@@ -26,16 +26,29 @@ import ConfirmDialog from '../../components/admin/ConfirmDialog';
 import Avatar from '../../components/common/Avatar';
 import Spinner from '../../components/common/Spinner';
 
+// Module-scoped persistent cache that survives React Router unmount/remount
+let persistentUsers = null;
+let persistentTotal = 0;
+let persistentTotalPages = 1;
+let persistentRoleCounts = null;
+let usersAlreadyLoaded = false;
+
 export const AdminUsersPage = () => {
   const [users, setUsers] = useState(() => {
+    if (persistentUsers && persistentUsers.length > 0) return persistentUsers;
     try {
       const cached = localStorage.getItem('looop_admin_users_cache');
-      return cached ? JSON.parse(cached) : [];
-    } catch {
-      return [];
-    }
+      const parsed = cached ? JSON.parse(cached) : [];
+      if (parsed.length > 0) {
+        persistentUsers = parsed;
+        usersAlreadyLoaded = true;
+        return parsed;
+      }
+    } catch {}
+    return [];
   });
   const [total, setTotal] = useState(() => {
+    if (persistentTotal > 0) return persistentTotal;
     try {
       const cached = localStorage.getItem('looop_admin_users_total');
       return cached ? parseInt(cached, 10) : 4;
@@ -43,13 +56,14 @@ export const AdminUsersPage = () => {
       return 4;
     }
   });
-  const [totalPages, setTotalPages] = useState(1);
+  const [totalPages, setTotalPages] = useState(() => persistentTotalPages || 1);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [roleCounts, setRoleCounts] = useState(() => {
+    if (persistentRoleCounts) return persistentRoleCounts;
     try {
       const cached = localStorage.getItem('looop_admin_users_counts');
       return cached ? JSON.parse(cached) : { all: 4, customers: 0, admins: 4, active: 4, suspended: 0 };
@@ -58,12 +72,10 @@ export const AdminUsersPage = () => {
     }
   });
   const [isLoading, setIsLoading] = useState(() => {
-    try {
-      const cached = localStorage.getItem('looop_admin_users_cache');
-      return !cached || JSON.parse(cached).length === 0;
-    } catch {
-      return true;
+    if (usersAlreadyLoaded || (persistentUsers && persistentUsers.length > 0)) {
+      return false;
     }
+    return true;
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notification, setNotification] = useState(null);
@@ -100,8 +112,13 @@ export const AdminUsersPage = () => {
         setUsers(uList);
         setTotal(res.data.total || 0);
         setTotalPages(res.data.totalPages || 1);
+        persistentUsers = uList;
+        persistentTotal = res.data.total || 0;
+        persistentTotalPages = res.data.totalPages || 1;
+        usersAlreadyLoaded = true;
         if (res.data.counts) {
           setRoleCounts(res.data.counts);
+          persistentRoleCounts = res.data.counts;
           try { localStorage.setItem('looop_admin_users_counts', JSON.stringify(res.data.counts)); } catch {}
         }
         if (page === 1 && !search && !roleFilter && !statusFilter) {
@@ -122,15 +139,21 @@ export const AdminUsersPage = () => {
     }
   }, [page, limit, search, roleFilter, statusFilter]);
 
-  // Initial load and live background polling (checks every 8s for new registrations/logins)
+  // Initial load and live background polling (checks every 10s for new registrations/logins)
   useEffect(() => {
-    const hasCache = users.length > 0 && page === 1 && !search && !roleFilter && !statusFilter;
-    fetchUsers(hasCache);
+    const isDefaultView = page === 1 && !search && !roleFilter && !statusFilter;
+    if (usersAlreadyLoaded && persistentUsers && persistentUsers.length > 0 && isDefaultView) {
+      // STRICTLY DO NOT RELOAD WHEN RETURNING FROM ANOTHER SECTION
+      setIsLoading(false);
+    } else {
+      fetchUsers(usersAlreadyLoaded);
+    }
+
     const interval = setInterval(() => {
       fetchUsers(true);
-    }, 8000);
+    }, 10000);
     return () => clearInterval(interval);
-  }, [fetchUsers, users.length, page, search, roleFilter, statusFilter]);
+  }, [fetchUsers, page, search, roleFilter, statusFilter]);
 
   const handleOpenDetails = async (user) => {
     setSelectedUser(user);

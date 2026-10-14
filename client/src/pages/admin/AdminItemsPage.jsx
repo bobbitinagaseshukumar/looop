@@ -21,18 +21,33 @@ import ConfirmDialog from '../../components/admin/ConfirmDialog';
 import Avatar from '../../components/common/Avatar';
 import Spinner from '../../components/common/Spinner';
 
+// Module-scoped persistent cache that survives React Router unmount/remount
+let persistentItems = null;
+let persistentWanted = null;
+let persistentTotal = 0;
+let persistentWantedTotal = 0;
+let persistentTotalPages = 1;
+let itemsAlreadyLoaded = false;
+let wantedAlreadyLoaded = false;
+
 export const AdminItemsPage = () => {
   const [activeTab, setActiveTab] = useState('items'); // 'items' | 'wanted'
   const [items, setItems] = useState(() => {
+    if (persistentItems && persistentItems.length > 0) return persistentItems;
     try {
       const cached = localStorage.getItem('looop_admin_items_cache');
-      return cached ? JSON.parse(cached) : [];
-    } catch {
-      return [];
-    }
+      const parsed = cached ? JSON.parse(cached) : [];
+      if (parsed.length > 0) {
+        persistentItems = parsed;
+        itemsAlreadyLoaded = true;
+        return parsed;
+      }
+    } catch {}
+    return [];
   });
-  const [wantedItems, setWantedItems] = useState([]);
+  const [wantedItems, setWantedItems] = useState(() => persistentWanted || []);
   const [total, setTotal] = useState(() => {
+    if (persistentTotal > 0) return persistentTotal;
     try {
       const cached = localStorage.getItem('looop_admin_items_total');
       return cached ? parseInt(cached, 10) : 0;
@@ -40,19 +55,17 @@ export const AdminItemsPage = () => {
       return 0;
     }
   });
-  const [totalPages, setTotalPages] = useState(1);
+  const [totalPages, setTotalPages] = useState(() => persistentTotalPages || 1);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sharingTypeFilter, setSharingTypeFilter] = useState('');
   const [isLoading, setIsLoading] = useState(() => {
-    try {
-      const cached = localStorage.getItem('looop_admin_items_cache');
-      return !cached || JSON.parse(cached).length === 0;
-    } catch {
-      return true;
+    if (itemsAlreadyLoaded || (persistentItems && persistentItems.length > 0)) {
+      return false;
     }
+    return true;
   });
   const [notification, setNotification] = useState(null);
 
@@ -84,6 +97,10 @@ export const AdminItemsPage = () => {
           setItems(list);
           setTotal(res.data.total || 0);
           setTotalPages(res.data.totalPages || 1);
+          persistentItems = list;
+          persistentTotal = res.data.total || 0;
+          persistentTotalPages = res.data.totalPages || 1;
+          itemsAlreadyLoaded = true;
           if (page === 1 && !search && !categoryFilter && !sharingTypeFilter && !statusFilter) {
             try {
               localStorage.setItem('looop_admin_items_cache', JSON.stringify(list));
@@ -100,25 +117,44 @@ export const AdminItemsPage = () => {
           status: statusFilter
         });
         if (res?.success) {
-          setWantedItems(res.data.wantedItems || []);
+          const wList = res.data.wantedItems || [];
+          setWantedItems(wList);
           setTotal(res.data.total || 0);
           setTotalPages(res.data.totalPages || 1);
+          persistentWanted = wList;
+          persistentWantedTotal = res.data.total || 0;
+          wantedAlreadyLoaded = true;
         }
       }
     } catch (err) {
       console.error('Failed to load listings:', err);
-      if (items.length === 0) {
+      if (!persistentItems || persistentItems.length === 0) {
         setNotification({ type: 'error', message: 'Failed to retrieve listings from database.' });
       }
     } finally {
       setIsLoading(false);
     }
-  }, [activeTab, page, search, categoryFilter, statusFilter, sharingTypeFilter, items.length]);
+  }, [activeTab, page, search, categoryFilter, statusFilter, sharingTypeFilter]);
 
+  // Strictly do NOT reload if already loaded once when navigating between sections
   useEffect(() => {
-    const hasCache = items.length > 0 && page === 1 && !search && !categoryFilter && !sharingTypeFilter && !statusFilter;
-    fetchData(hasCache);
-  }, [fetchData]);
+    if (activeTab === 'items') {
+      const isDefaultView = page === 1 && !search && !categoryFilter && !sharingTypeFilter && !statusFilter;
+      if (itemsAlreadyLoaded && persistentItems && persistentItems.length > 0 && isDefaultView) {
+        // Already loaded! Do not reload or re-render skeletons when returning to this page
+        setIsLoading(false);
+        return;
+      }
+      fetchData(itemsAlreadyLoaded);
+    } else {
+      const isDefaultView = page === 1 && !search && !categoryFilter && !statusFilter;
+      if (wantedAlreadyLoaded && persistentWanted && isDefaultView) {
+        setIsLoading(false);
+        return;
+      }
+      fetchData(wantedAlreadyLoaded);
+    }
+  }, [activeTab, page, search, categoryFilter, statusFilter, sharingTypeFilter, fetchData]);
 
   const handleOpenDetails = async (item) => {
     setDetailsItem(item);
