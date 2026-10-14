@@ -48,15 +48,15 @@ function buildLooopEmailHtml({
 
   const cardHtml = isOtp
     ? `
-      <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 28px 20px; text-align: center; margin: 24px 0;">
-        <div style="font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1.5px; color: #64748b; margin-bottom: 14px;">
-          YOUR VERIFICATION CODE
+      <div style="background: linear-gradient(135deg, #ecfdf5 0%, #f0fdf4 100%); border: 2px solid #10b981; border-radius: 16px; padding: 28px 20px; text-align: center; margin: 24px 0; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.12);">
+        <div style="display: inline-block; background-color: #d1fae5; color: #065f46; font-size: 11px; font-weight: 800; padding: 4px 14px; border-radius: 20px; letter-spacing: 1.5px; text-transform: uppercase;">
+          ONE-TIME VERIFICATION CODE
         </div>
-        <div style="font-size: 34px; font-weight: 800; letter-spacing: 8px; color: #0f172a; margin: 14px 0; font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;">
+        <div style="font-size: 40px; font-weight: 900; letter-spacing: 10px; color: #047857; margin: 18px 0 12px 0; font-family: 'SF Mono', Consolas, 'Liberation Mono', Menlo, monospace;">
           ${formattedOtp}
         </div>
-        <div style="font-size: 13px; font-weight: 500; color: #64748b; margin-top: 12px;">
-          Expires in ${otpExpiry}
+        <div style="display: inline-block; background-color: #ffffff; border: 1px solid #a7f3d0; border-radius: 8px; padding: 4px 12px; font-size: 12px; font-weight: 700; color: #059669;">
+          ⏱ Valid for ${otpExpiry || '10 minutes'}
         </div>
       </div>
     `
@@ -182,18 +182,18 @@ const looopEmailTemplates = {
     })
   }),
 
-  otpEmail: ({ name = 'Member', otpCode = '482731', expiry = '5 minutes' }) => ({
-    subject: 'Verify your LOOOP account',
+  otpEmail: ({ name = 'Member', otpCode = '482731', expiry = '10 minutes' }) => ({
+    subject: `[LOOOP] ${otpCode} is your verification code`,
     html: buildLooopEmailHtml({
-      headline: 'Verify your LOOOP account',
+      headline: 'Verify Your Email Address',
       recipientName: name,
       bodyParagraphs: [
-        'Your LOOOP verification code is:'
+        'Welcome to LOOOP! To verify your email address and activate your account, please enter the 6-digit code below into your registration screen:'
       ],
       isOtp: true,
       otpCode,
-      otpExpiry: expiry || '5 minutes',
-      extraNote: 'This code expires soon.<br><br>For your security, never share this code with anyone, including LOOOP support.<br><br>If you did not request this verification code, you can safely ignore this email.',
+      otpExpiry: expiry || '10 minutes',
+      extraNote: 'This verification code is strictly confidential.<br><br>For your security, never share this code with anyone. LOOOP staff will never ask for your verification code.<br><br>If you did not request this verification code, you can safely ignore this email.',
       signoffTeam: '— The LOOOP Team'
     })
   }),

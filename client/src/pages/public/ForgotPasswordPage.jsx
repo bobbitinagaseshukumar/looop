@@ -85,7 +85,18 @@ export const ForgotPasswordPage = () => {
   };
 
   const handleOtpDigitChange = (index, value) => {
-    const val = value.slice(-1);
+    const rawVal = value.replace(/\D/g, '');
+    if (rawVal.length > 1) {
+      const digits = rawVal.slice(0, 6).split('');
+      const newDigits = [...otpDigits];
+      digits.forEach((ch, i) => {
+        if (i < 6) newDigits[i] = ch;
+      });
+      setOtpDigits(newDigits);
+      otpInputRefs.current[Math.min(digits.length, 5)]?.focus();
+      return;
+    }
+    const val = rawVal.slice(-1);
     const newDigits = [...otpDigits];
     newDigits[index] = val;
     setOtpDigits(newDigits);
@@ -103,11 +114,11 @@ export const ForgotPasswordPage = () => {
 
   const handleOtpPaste = (e) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData('text').trim().slice(0, 6);
-    if (/^\d+$/.test(pasted)) {
-      const newDigits = pasted.split('').concat(Array(6).fill('')).slice(0, 6);
+    const cleanDigits = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (cleanDigits) {
+      const newDigits = cleanDigits.split('').concat(Array(6).fill('')).slice(0, 6);
       setOtpDigits(newDigits);
-      otpInputRefs.current[Math.min(pasted.length, 5)]?.focus();
+      otpInputRefs.current[Math.min(cleanDigits.length, 5)]?.focus();
     }
   };
 
@@ -385,11 +396,14 @@ export const ForgotPasswordPage = () => {
                     key={idx}
                     ref={(el) => (otpInputRefs.current[idx] = el)}
                     type="text"
-                    maxLength={1}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete={idx === 0 ? 'one-time-code' : 'off'}
+                    maxLength={idx === 0 ? 6 : 1}
                     value={digit}
                     onChange={(e) => handleOtpDigitChange(idx, e.target.value)}
                     onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                    onPaste={idx === 0 ? handleOtpPaste : undefined}
+                    onPaste={handleOtpPaste}
                     style={{
                       width: '42px',
                       height: '50px',

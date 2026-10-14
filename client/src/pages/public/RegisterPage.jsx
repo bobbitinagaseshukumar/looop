@@ -262,6 +262,22 @@ export const RegisterPage = () => {
     }
   };
 
+  // Handle paste across all 6 inline OTP inputs
+  const handleInlineOtpPaste = (e) => {
+    e.preventDefault();
+    const pasted = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (!pasted) return;
+    const digits = pasted.split('');
+    const newDigits = [...inlineOtpDigits];
+    digits.forEach((char, i) => {
+      if (i < 6) newDigits[i] = char;
+    });
+    setInlineOtpDigits(newDigits);
+    setInlineOtpError('');
+    const nextIdx = Math.min(pasted.length, 5);
+    inlineOtpRefs.current[nextIdx]?.focus();
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setServerError('');
@@ -271,10 +287,35 @@ export const RegisterPage = () => {
       return;
     }
 
-    // If email is not verified yet, trigger inline verification / DB check
+    // If email is not verified yet, handle inline verification or DB check
     if (!isEmailVerified) {
-      await handleVerifyEmailClick();
-      return;
+      if (inlineOtpSent) {
+        const code = inlineOtpDigits.join('');
+        if (code.length === 6) {
+          setIsSubmitting(true);
+          setInlineOtpError('');
+          try {
+            await authService.verifyOtp(email.trim(), code);
+            setIsEmailVerified(true);
+            setInlineOtpSent(false);
+            addToast({
+              title: 'Email Verified!',
+              message: 'Your email address has been verified successfully.',
+              variant: 'success'
+            });
+          } catch (err) {
+            setInlineOtpError(err.message || 'Invalid or expired verification code. Please check your email.');
+            setIsSubmitting(false);
+            return;
+          }
+        } else {
+          setInlineOtpError('Please enter the 6-digit verification code sent to your email and click Confirm.');
+          return;
+        }
+      } else {
+        await handleVerifyEmailClick();
+        return;
+      }
     }
 
     setIsSubmitting(true);
@@ -331,7 +372,18 @@ export const RegisterPage = () => {
   };
 
   const handleOtpDigitChange = (index, value) => {
-    const val = value.slice(-1);
+    const rawVal = value.replace(/\D/g, '');
+    if (rawVal.length > 1) {
+      const digits = rawVal.slice(0, 6).split('');
+      const newDigits = [...otpDigits];
+      digits.forEach((ch, i) => {
+        if (i < 6) newDigits[i] = ch;
+      });
+      setOtpDigits(newDigits);
+      otpInputRefs.current[Math.min(digits.length, 5)]?.focus();
+      return;
+    }
+    const val = rawVal.slice(-1);
     const newDigits = [...otpDigits];
     newDigits[index] = val;
     setOtpDigits(newDigits);
@@ -349,11 +401,11 @@ export const RegisterPage = () => {
 
   const handleOtpPaste = (e) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData('text').trim().slice(0, 6);
-    if (/^\d+$/.test(pasted)) {
-      const newDigits = pasted.split('').concat(Array(6).fill('')).slice(0, 6);
+    const cleanDigits = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6);
+    if (cleanDigits) {
+      const newDigits = cleanDigits.split('').concat(Array(6).fill('')).slice(0, 6);
       setOtpDigits(newDigits);
-      otpInputRefs.current[Math.min(pasted.length, 5)]?.focus();
+      otpInputRefs.current[Math.min(cleanDigits.length, 5)]?.focus();
     }
   };
 
@@ -620,11 +672,14 @@ export const RegisterPage = () => {
                       key={idx}
                       ref={(el) => (otpInputRefs.current[idx] = el)}
                       type="text"
-                      maxLength={1}
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      autoComplete={idx === 0 ? 'one-time-code' : 'off'}
+                      maxLength={idx === 0 ? 6 : 1}
                       value={digit}
                       onChange={(e) => handleOtpDigitChange(idx, e.target.value)}
                       onKeyDown={(e) => handleOtpKeyDown(idx, e)}
-                      onPaste={idx === 0 ? handleOtpPaste : undefined}
+                      onPaste={handleOtpPaste}
                       style={{
                         width: '42px',
                         height: '50px',
@@ -945,10 +1000,27 @@ export const RegisterPage = () => {
                             key={idx}
                             ref={(el) => (inlineOtpRefs.current[idx] = el)}
                             type="text"
-                            maxLength={1}
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            autoComplete={idx === 0 ? 'one-time-code' : 'off'}
+                            maxLength={idx === 0 ? 6 : 1}
                             value={digit}
+                            onPaste={handleInlineOtpPaste}
                             onChange={(e) => {
-                              const val = e.target.value.slice(-1);
+                              const rawVal = e.target.value.replace(/\D/g, '');
+                              if (rawVal.length > 1) {
+                                const digits = rawVal.slice(0, 6).split('');
+                                const copy = [...inlineOtpDigits];
+                                digits.forEach((ch, i) => {
+                                  if (i < 6) copy[i] = ch;
+                                });
+                                setInlineOtpDigits(copy);
+                                setInlineOtpError('');
+                                const nextIdx = Math.min(digits.length, 5);
+                                inlineOtpRefs.current[nextIdx]?.focus();
+                                return;
+                              }
+                              const val = rawVal.slice(-1);
                               const copy = [...inlineOtpDigits];
                               copy[idx] = val;
                               setInlineOtpDigits(copy);

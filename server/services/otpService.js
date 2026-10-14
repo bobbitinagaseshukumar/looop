@@ -94,11 +94,11 @@ async function createOtpToken({ userId = null, email, purpose, expiryMinutes = 1
   const id = `otp_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
   try {
-    // Invalidate existing unconsumed tokens for this email & purpose
+    // Clean up expired tokens for this email & purpose
     await query(
       `UPDATE otp_tokens 
        SET consumed_at = CURRENT_TIMESTAMP 
-       WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL`,
+       WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL AND expires_at <= CURRENT_TIMESTAMP`,
       [cleanEmail, purpose]
     );
 
@@ -141,56 +141,78 @@ async function verifyOtpToken({ email, otp, purpose }) {
   }
 
   try {
+    // Look for active unconsumed tokens that have not expired yet (up to 5 recent active codes)
     const res = await query(
       `SELECT * FROM otp_tokens 
-       WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL 
+       WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL AND expires_at > CURRENT_TIMESTAMP 
        ORDER BY created_at DESC 
-       LIMIT 1`,
+       LIMIT 5`,
       [cleanEmail, purpose]
     );
 
     if (res.rows.length === 0) {
-      return { success: false, message: 'No active verification code found. Please request a new code.' };
+      // Check if there are expired or already used tokens to provide a helpful message
+      const historyRes = await query(
+        `SELECT consumed_at, expires_at FROM otp_tokens 
+         WHERE email = $1 AND purpose = $2 
+         ORDER BY created_at DESC 
+         LIMIT 1`,
+        [cleanEmail, purpose]
+      );
+      if (historyRes.rows.length > 0 && historyRes.rows[0].consumed_at) {
+        return { success: false, message: 'This verification code was already used. Please request a new code.' };
+      }
+      return { success: false, message: 'Verification code expired or not found. Please click Resend OTP to receive a new code.' };
     }
 
-    const token = res.rows[0];
-
-    // Check failed attempt count
-    if (token.failed_attempts >= 5) {
-      // Mark consumed/invalidated
-      await query(`UPDATE otp_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE id = $1`, [token.id]);
-      return { success: false, message: 'Too many invalid attempts. This code has been invalidated. Please request a new code.' };
-    }
-
-    // Check expiration
-    if (new Date(token.expires_at).getTime() < Date.now()) {
-      await query(`UPDATE otp_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE id = $1`, [token.id]);
-      return { success: false, message: 'Your verification code has expired. Please request a new one.' };
-    }
-
-    // Hash user input and compare with stored hash
     const inputHash = hashOtp(cleanOtp);
-    if (token.hashed_otp !== inputHash) {
-      const newAttempts = (token.failed_attempts || 0) + 1;
-      await query(`UPDATE otp_tokens SET failed_attempts = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`, [newAttempts, token.id]);
+
+    // Find any active unexpired token that matches (accepts either hashed or direct unhashed representation)
+    const matchedToken = res.rows.find(
+      (token) => (token.hashed_otp === inputHash || token.hashed_otp === cleanOtp) && (token.failed_attempts || 0) < 5
+    );
+
+    if (!matchedToken) {
+      // Record failed attempt on the latest active token
+      const latestToken = res.rows[0];
+      const newAttempts = (latestToken.failed_attempts || 0) + 1;
+      await query(
+        `UPDATE otp_tokens SET failed_attempts = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2`,
+        [newAttempts, latestToken.id]
+      );
+
+      if (newAttempts >= 5) {
+        // Invalidate active tokens if excessive failed attempts occur
+        await query(
+          `UPDATE otp_tokens SET consumed_at = CURRENT_TIMESTAMP WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL`,
+          [cleanEmail, purpose]
+        );
+        return {
+          success: false,
+          message: 'Too many invalid attempts. For your security, this verification code has been invalidated. Please request a new code.'
+        };
+      }
 
       const remaining = 5 - newAttempts;
       return {
         success: false,
-        message: remaining > 0 
-          ? `Invalid verification code. Please try again. (${remaining} attempts remaining)` 
-          : 'Invalid verification code. Maximum attempts reached.'
+        message: `Invalid verification code. Please check your email for the 6-digit code. (${remaining} attempts remaining)`
       };
     }
 
-    // Success! Mark code as consumed to prevent reuse
-    await query(`UPDATE otp_tokens SET consumed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [token.id]);
+    // Success! Mark all active tokens for this email & purpose as consumed to prevent reuse
+    await query(
+      `UPDATE otp_tokens 
+       SET consumed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP 
+       WHERE email = $1 AND purpose = $2 AND consumed_at IS NULL`,
+      [cleanEmail, purpose]
+    );
 
     return {
       success: true,
-      userId: token.user_id,
-      email: token.email,
-      purpose: token.purpose
+      userId: matchedToken.user_id,
+      email: matchedToken.email,
+      purpose: matchedToken.purpose
     };
   } catch (err) {
     console.error('[Verify OTP Error]', err.message);
