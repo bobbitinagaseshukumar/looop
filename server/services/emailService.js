@@ -4,19 +4,22 @@ const NodemailerProvider = require('./email/NodemailerProvider');
 const { buildLooopEmailHtml, looopEmailTemplates } = require('./emailTemplateService');
 const { query } = require('../config/postgres');
 
-let activeProvider;
-if (process.env.BREVO_API_KEY && !process.env.BREVO_API_KEY.includes('your_brevo') && process.env.EMAIL_PROVIDER === 'brevo') {
-  activeProvider = new BrevoProvider();
-} else {
-  activeProvider = new NodemailerProvider();
+let activeProvider = null;
+
+function getActiveProvider() {
+  const brevoKey = (process.env.BREVO_API_KEY || '').trim();
+  if (brevoKey && !brevoKey.includes('your_brevo') && (process.env.EMAIL_PROVIDER === 'brevo' || brevoKey.startsWith('xkeysib-'))) {
+    if (!activeProvider || activeProvider.name !== 'Brevo') {
+      activeProvider = new BrevoProvider();
+    }
+  } else if (!activeProvider) {
+    activeProvider = new NodemailerProvider();
+  }
+  return activeProvider;
 }
 
 function setProvider(providerInstance) {
   activeProvider = providerInstance;
-}
-
-function getActiveProvider() {
-  return activeProvider;
 }
 
 /**
@@ -232,7 +235,7 @@ async function dispatchEmail({
   // 5. Attempt Dispatch via Active Provider
   await updateOutboxRecord(outboxId, { status: 'PROCESSING', attemptCount: 1 });
 
-  const result = await activeProvider.sendTransactionalEmail({
+  const result = await getActiveProvider().sendTransactionalEmail({
     toEmail: recipientEmail,
     recipientName,
     subject,
@@ -279,7 +282,7 @@ async function dispatchEmail({
  * Process Outbox Queue (Safe Bounded Retries with Exponential Backoff + Jitter)
  */
 async function processOutboxQueue(maxBatch = 10) {
-  const providerHealth = await activeProvider.getProviderHealth();
+  const providerHealth = await getActiveProvider().getProviderHealth();
   if (!providerHealth.isReady) {
     console.warn(`[Outbox Worker] Suppressed queue processing. Provider health: ${providerHealth.statusState}`);
     return { processed: 0, status: providerHealth.statusState };
@@ -311,7 +314,7 @@ async function processOutboxQueue(maxBatch = 10) {
 
       await updateOutboxRecord(item.id, { status: 'PROCESSING', attemptCount: attempts });
 
-      const res = await activeProvider.sendTransactionalEmail({
+      const res = await getActiveProvider().sendTransactionalEmail({
         toEmail: item.recipient_email,
         recipientName: templateData.name || 'Member',
         subject,
@@ -353,7 +356,7 @@ async function processOutboxQueue(maxBatch = 10) {
  * System Email Health & Diagnostics Summary
  */
 async function getHealthStatus() {
-  const providerHealth = await activeProvider.getProviderHealth();
+  const providerHealth = await getActiveProvider().getProviderHealth();
 
   let outboxStats = { pending: 0, accepted: 0, failed: 0, total: 0 };
   try {
@@ -377,7 +380,7 @@ async function getHealthStatus() {
   } catch {}
 
   return {
-    providerName: activeProvider.name,
+    providerName: getActiveProvider().name,
     deliveryEnabled: process.env.EMAIL_DELIVERY_ENABLED === 'true',
     statusState: providerHealth.statusState,
     isReady: providerHealth.isReady,
@@ -576,7 +579,7 @@ async function sendAdminTestEmail({ testRecipientEmail }) {
     return { success: false, message: 'Invalid test recipient email address.' };
   }
 
-  const health = await activeProvider.getProviderHealth();
+  const health = await getActiveProvider().getProviderHealth();
   if (!health.isReady) {
     return {
       success: false,
