@@ -258,7 +258,6 @@ export const authService = {
       if (data && data.success) {
         return {
           success: true,
-          devOtp: data.devOtp,
           message: data.message || 'A 6-digit verification code has been sent to your email.'
         };
       }
@@ -281,7 +280,6 @@ export const authService = {
       if (directRes.ok && data.success) {
         return {
           success: true,
-          devOtp: data.devOtp,
           message: data.message || 'A 6-digit verification code has been sent to your email.'
         };
       }

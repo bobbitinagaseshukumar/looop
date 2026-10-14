@@ -58,7 +58,6 @@ export const RegisterPage = () => {
   const [inlineOtpCountdown, setInlineOtpCountdown] = useState(60);
   const [isVerifyingInlineOtp, setIsVerifyingInlineOtp] = useState(false);
   const [inlineOtpError, setInlineOtpError] = useState('');
-  const [devOtp, setDevOtp] = useState('');
   const inlineOtpRefs = useRef([]);
 
   // Visibility toggles
@@ -218,24 +217,15 @@ export const RegisterPage = () => {
       }
 
       // 2. Email is new! Dispatch 6-digit Brevo OTP code
-      const otpRes = await authService.sendOtp(cleanEmail);
+      await authService.sendOtp(cleanEmail);
       setInlineOtpSent(true);
       setInlineOtpDigits(['', '', '', '', '', '']);
       setInlineOtpCountdown(60);
-      if (otpRes?.devOtp) {
-        setDevOtp(otpRes.devOtp);
-        addToast({
-          title: `Verification Code: ${otpRes.devOtp}`,
-          message: `Your 6-digit verification code is: ${otpRes.devOtp}. Enter this code or click Auto-Fill to complete verification.`,
-          variant: 'success'
-        });
-      } else {
-        addToast({
-          title: 'Verification Code Sent',
-          message: `A 6-digit verification code has been dispatched to ${cleanEmail}. Please check your inbox or spam folder.`,
-          variant: 'info'
-        });
-      }
+      addToast({
+        title: 'Verification Code Sent',
+        message: `A 6-digit verification code has been dispatched to ${cleanEmail} via email. Please check your inbox or spam folder.`,
+        variant: 'info'
+      });
       setTimeout(() => inlineOtpRefs.current[0]?.focus(), 150);
     } catch (err) {
       setInlineOtpError(err.message || 'Failed to dispatch verification code via Brevo Email. Please try again.');
@@ -326,22 +316,13 @@ export const RegisterPage = () => {
     setServerError('');
     setIsSendingOtp(true);
     try {
-      const res = await authService.sendOtp(email.trim());
+      await authService.sendOtp(email.trim());
       setOtpCountdown(60);
-      if (res?.devOtp) {
-        setDevOtp(res.devOtp);
-        addToast({
-          title: `New Verification Code: ${res.devOtp}`,
-          message: `Your new 6-digit verification code is: ${res.devOtp}. Enter this code or click Auto-Fill to verify.`,
-          variant: 'success'
-        });
-      } else {
-        addToast({
-          title: 'Code Resent via Email',
-          message: 'A new 6-digit verification code has been dispatched to your email. Please check your inbox.',
-          variant: 'info'
-        });
-      }
+      addToast({
+        title: 'Code Resent via Email',
+        message: 'A new 6-digit verification code has been dispatched to your email. Please check your inbox.',
+        variant: 'info'
+      });
     } catch (err) {
       setServerError('Failed to resend verification code. Please try again.');
     } finally {
@@ -631,42 +612,7 @@ export const RegisterPage = () => {
               </div>
 
               <form onSubmit={handleVerifyOtpSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-                {devOtp && (
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 14px',
-                    backgroundColor: '#ecfdf5',
-                    border: '1.5px solid #a7f3d0',
-                    borderRadius: '12px'
-                  }}>
-                    <div style={{ fontSize: '0.85rem', color: '#065f46' }}>
-                      Verification Code: <strong style={{ letterSpacing: '3px', fontSize: '1.1rem', color: '#047857' }}>{devOtp}</strong>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const digits = devOtp.slice(0, 6).split('');
-                        while (digits.length < 6) digits.push('');
-                        setOtpDigits(digits);
-                        setServerError('');
-                      }}
-                      style={{
-                        backgroundColor: '#047857',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        padding: '4px 10px',
-                        fontSize: '0.75rem',
-                        fontWeight: 700,
-                        cursor: 'pointer'
-                      }}
-                    >
-                      Auto-Fill Code
-                    </button>
-                  </div>
-                )}
+
 
                 <div style={{ display: 'flex', justifyContent: 'center', gap: '6px' }}>
                   {otpDigits.map((digit, idx) => (
@@ -991,42 +937,7 @@ export const RegisterPage = () => {
                         Enter 6-digit OTP code sent to <strong>{email.trim()}</strong>:
                       </div>
 
-                      {devOtp && (
-                        <div style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '8px 12px',
-                          backgroundColor: '#ecfdf5',
-                          border: '1.5px solid #a7f3d0',
-                          borderRadius: '10px'
-                        }}>
-                          <div style={{ fontSize: '0.8rem', color: '#065f46' }}>
-                            Verification Code: <strong style={{ letterSpacing: '3px', fontSize: '1.05rem', color: '#047857' }}>{devOtp}</strong>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const digits = devOtp.slice(0, 6).split('');
-                              while (digits.length < 6) digits.push('');
-                              setInlineOtpDigits(digits);
-                              setInlineOtpError('');
-                            }}
-                            style={{
-                              backgroundColor: '#047857',
-                              color: '#ffffff',
-                              border: 'none',
-                              borderRadius: '6px',
-                              padding: '4px 10px',
-                              fontSize: '0.725rem',
-                              fontWeight: 700,
-                              cursor: 'pointer'
-                            }}
-                          >
-                            Auto-Fill Code
-                          </button>
-                        </div>
-                      )}
+
 
                       <div style={{ display: 'flex', gap: '6px', justifyContent: 'center' }}>
                         {inlineOtpDigits.map((digit, idx) => (

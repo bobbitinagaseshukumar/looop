@@ -646,11 +646,9 @@ exports.sendOtp = async (req, res) => {
       });
     }
 
-    const isLiveDelivery = process.env.EMAIL_DELIVERY_ENABLED === 'true' && process.env.BREVO_API_KEY && !process.env.BREVO_API_KEY.includes('your_brevo');
     return res.status(200).json({
       success: true,
-      message: 'A 6-digit verification code has been sent to your email.',
-      ...(!isLiveDelivery || process.env.NODE_ENV !== 'production' ? { devOtp: otpRes.rawOtp } : {})
+      message: 'A 6-digit verification code has been sent to your email.'
     });
   } catch (error) {
     console.error('[AUTH] sendOtp error:', error);
