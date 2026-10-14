@@ -675,13 +675,101 @@ exports.getItemDetails = async (req, res) => {
   }
 };
 
+/**
+ * Permanently delete item from PostgreSQL and MongoDB databases
+ */
+exports.deleteItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, message: 'Item ID is required.' });
+    }
+
+    let deletedTitle = 'Item';
+
+    // 1. Delete from PostgreSQL
+    try {
+      const itemCheck = await pgQuery('SELECT id, title FROM items WHERE id = $1 LIMIT 1', [id]);
+      if (itemCheck?.rows?.[0]) {
+        deletedTitle = itemCheck.rows[0].title;
+      }
+
+      // Safely delete dependent records in foreign key tables
+      await pgQuery('DELETE FROM saved_items WHERE item_id = $1', [id]).catch(() => {});
+      await pgQuery('DELETE FROM matches WHERE item_id = $1', [id]).catch(() => {});
+      await pgQuery('DELETE FROM requests WHERE item_id = $1 OR offered_item_id = $1', [id]).catch(() => {});
+      await pgQuery('DELETE FROM transactions WHERE item_id = $1 OR offered_item_id = $1', [id]).catch(() => {});
+      await pgQuery('UPDATE conversations SET item_id = NULL WHERE item_id = $1', [id]).catch(() => {});
+      await pgQuery('UPDATE reviews SET item_id = NULL WHERE item_id = $1', [id]).catch(() => {});
+      await pgQuery('UPDATE reports SET target_item_id = NULL WHERE target_item_id = $1', [id]).catch(() => {});
+      await pgQuery('UPDATE points_ledger SET item_id = NULL WHERE item_id = $1', [id]).catch(() => {});
+
+      const delRes = await pgQuery('DELETE FROM items WHERE id = $1 RETURNING id, title;', [id]);
+      if (delRes?.rows?.[0]) {
+        deletedTitle = delRes.rows[0].title;
+      }
+    } catch (pgErr) {
+      console.warn('[Admin deleteItem] PG delete warning:', pgErr.message);
+    }
+
+    // 2. Delete from MongoDB if available
+    if (mongoose.connection && mongoose.connection.readyState === 1 && mongoose.Types.ObjectId.isValid(id)) {
+      try {
+        await Item.findByIdAndDelete(id);
+      } catch (mErr) {
+        console.warn('[Admin deleteItem] Mongo delete warning:', mErr.message);
+      }
+    }
+
+    // 3. Clear all caches
+    clearAdminItemsCache();
+    adminDashboardService.invalidateDashboardCache();
+    adminAnalyticsService.invalidateAnalyticsCache();
+
+    try {
+      const { clearDiscoveryCache } = require('./itemController');
+      if (typeof clearDiscoveryCache === 'function') {
+        clearDiscoveryCache();
+      }
+    } catch {}
+
+    // 4. Log to Admin Audit Log
+    try {
+      await logAction({
+        adminId: req.admin?._id || req.user?.id || 'usr-admin-01',
+        action: 'ITEM_PERMANENTLY_DELETED',
+        targetType: 'ITEM',
+        targetId: id,
+        targetTitle: deletedTitle,
+        metadata: { deletedFromDatabase: true },
+        ipAddress: req.ip
+      });
+    } catch {}
+
+    return res.status(200).json({
+      success: true,
+      message: `"${deletedTitle}" has been permanently deleted from the database.`
+    });
+  } catch (error) {
+    console.error('Error permanently deleting item:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to delete item from database.'
+    });
+  }
+};
+
 exports.moderateItem = async (req, res) => {
   try {
     const { id } = req.params;
     const { action, reason = '' } = req.body;
 
+    if (['delete', 'delete_permanently', 'destroy'].includes(action)) {
+      return exports.deleteItem(req, res);
+    }
+
     if (!['hide', 'remove', 'restore'].includes(action)) {
-      return res.status(400).json({ success: false, message: 'Action must be hide, remove, or restore.' });
+      return res.status(400).json({ success: false, message: 'Action must be hide, remove, restore, or delete_permanently.' });
     }
 
     // 1. Try PostgreSQL first

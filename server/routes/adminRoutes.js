@@ -22,6 +22,7 @@ router.delete('/users/:id', adminController.deleteUser);
 // 4. Listing Moderation
 router.get('/items', adminController.getItems);
 router.get('/items/:id', adminController.getItemDetails);
+router.delete('/items/:id', adminController.deleteItem);
 router.patch('/items/:id/moderation', adminController.moderateItem);
 router.patch('/items/:id/approve', adminController.approveItem);
 router.patch('/items/:id/reject', adminController.rejectItem);

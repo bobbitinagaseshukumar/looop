@@ -188,6 +188,28 @@ export const AdminItemsPage = () => {
     if (!modTargetItem) return;
     try {
       setIsModLoading(true);
+      if (modAction === 'delete_permanently') {
+        const itemId = modTargetItem._id || modTargetItem.id;
+        const res = await adminService.deleteItem(itemId);
+        if (res?.success) {
+          setNotification({
+            type: 'success',
+            message: res.message || `"${modTargetItem.title}" has been permanently deleted from the database.`
+          });
+          setItems((prev) => prev.filter((i) => (i._id || i.id) !== itemId));
+          setTotal((prev) => Math.max(0, prev - 1));
+          setModTargetItem(null);
+          setIsDetailsOpen(false);
+          fetchData(true);
+        } else {
+          setNotification({
+            type: 'error',
+            message: res?.message || 'Failed to delete item from database.'
+          });
+        }
+        return;
+      }
+
       const res = await adminService.moderateItem(modTargetItem._id, {
         action: modAction,
         reason
@@ -342,26 +364,50 @@ export const AdminItemsPage = () => {
           )}
 
           {item.status === 'suspended' || item.status === 'removed' ? (
-            <button
-              type="button"
-              onClick={() => handleOpenModeration(item, 'restore')}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: '6px 10px',
-                backgroundColor: 'rgba(16, 185, 129, 0.15)',
-                border: '1px solid rgba(16, 185, 129, 0.3)',
-                borderRadius: 'var(--radius-xs)',
-                color: '#34d399',
-                fontSize: '0.75rem',
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}
-            >
-              <RotateCcw size={12} />
-              <span>Restore</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={() => handleOpenModeration(item, 'restore')}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '6px 10px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                  border: '1px solid rgba(16, 185, 129, 0.3)',
+                  borderRadius: 'var(--radius-xs)',
+                  color: '#34d399',
+                  fontSize: '0.75rem',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                <RotateCcw size={12} />
+                <span>Restore</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleOpenModeration(item, 'delete_permanently')}
+                title="Permanently erase from PostgreSQL database"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '6px 10px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.25)',
+                  border: '1px solid rgba(239, 68, 68, 0.5)',
+                  borderRadius: 'var(--radius-xs)',
+                  color: '#fca5a5',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                <Trash2 size={12} />
+                <span>Delete from DB</span>
+              </button>
+            </>
           ) : (
             <>
               <button
@@ -404,6 +450,28 @@ export const AdminItemsPage = () => {
               >
                 <Trash2 size={12} />
                 <span>Remove</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleOpenModeration(item, 'delete_permanently')}
+                title="Permanently erase from PostgreSQL database"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: '6px 10px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.25)',
+                  border: '1px solid rgba(239, 68, 68, 0.5)',
+                  borderRadius: 'var(--radius-xs)',
+                  color: '#fca5a5',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                <Trash2 size={12} />
+                <span>Delete from DB</span>
               </button>
             </>
           )}
@@ -690,22 +758,34 @@ export const AdminItemsPage = () => {
       <ConfirmDialog
         isOpen={Boolean(modTargetItem)}
         title={
-          modAction === 'remove'
+          modAction === 'delete_permanently'
+            ? `Delete "${modTargetItem?.title}" from Database?`
+            : modAction === 'remove'
             ? `Remove "${modTargetItem?.title}"?`
             : modAction === 'hide'
             ? `Hide "${modTargetItem?.title}" from search?`
             : `Restore "${modTargetItem?.title}" to active?`
         }
         message={
-          modAction === 'remove'
+          modAction === 'delete_permanently'
+            ? `⚠️ CRITICAL: This will permanently erase "${modTargetItem?.title}" from the PostgreSQL database and storage. It cannot be recovered.`
+            : modAction === 'remove'
             ? 'Removing this item will revoke public visibility. Historical transaction records will be preserved safely. Items in active exchange cannot be removed.'
             : modAction === 'hide'
             ? 'Hiding will set the item availability to Unavailable while under administrative review.'
             : 'Restoring will return the listing to active community discovery.'
         }
-        confirmLabel={modAction === 'remove' ? 'Remove Listing' : modAction === 'hide' ? 'Hide Listing' : 'Restore Listing'}
-        confirmVariant={modAction === 'remove' ? 'danger' : modAction === 'hide' ? 'warning' : 'primary'}
-        requireReason={modAction !== 'restore'}
+        confirmLabel={
+          modAction === 'delete_permanently'
+            ? 'Delete from Database'
+            : modAction === 'remove'
+            ? 'Remove Listing'
+            : modAction === 'hide'
+            ? 'Hide Listing'
+            : 'Restore Listing'
+        }
+        confirmVariant={modAction === 'delete_permanently' || modAction === 'remove' ? 'danger' : modAction === 'hide' ? 'warning' : 'primary'}
+        requireReason={modAction !== 'restore' && modAction !== 'delete_permanently'}
         reasonPlaceholder="Specify moderation reason (e.g. prohibited goods, inaccurate description, copyright issue)..."
         isLoading={isModLoading}
         onConfirm={handleConfirmModeration}
@@ -829,7 +909,30 @@ export const AdminItemsPage = () => {
               </div>
             )}
 
-            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'flex-end' }}>
+            <div style={{ marginTop: '24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  handleOpenModeration(detailsItem, 'delete_permanently');
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                  border: '1px solid rgba(239, 68, 68, 0.5)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: '#f87171',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                <Trash2 size={14} />
+                <span>Delete from Database</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsDetailsOpen(false)}

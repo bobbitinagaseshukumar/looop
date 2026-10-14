@@ -439,6 +439,37 @@ export const adminService = {
     return res.data;
   },
 
+  deleteItem: async (id) => {
+    try {
+      const res = await api.delete(`/admin/items/${id}`);
+      if (res?.data?.success) {
+        return res.data;
+      }
+    } catch (err) {
+      console.warn('[adminService.deleteItem] Primary API notice:', err.message);
+    }
+
+    // Direct Neon PostgreSQL fallback
+    try {
+      await neonDb.query('DELETE FROM saved_items WHERE item_id = $1', [id]);
+      await neonDb.query('DELETE FROM matches WHERE item_id = $1', [id]);
+      await neonDb.query('DELETE FROM requests WHERE item_id = $1 OR offered_item_id = $1', [id]);
+      await neonDb.query('DELETE FROM transactions WHERE item_id = $1 OR offered_item_id = $1', [id]);
+      await neonDb.query('UPDATE conversations SET item_id = NULL WHERE item_id = $1', [id]);
+      await neonDb.query('UPDATE reviews SET item_id = NULL WHERE item_id = $1', [id]);
+      await neonDb.query('UPDATE reports SET target_item_id = NULL WHERE target_item_id = $1', [id]);
+      await neonDb.query('UPDATE points_ledger SET item_id = NULL WHERE item_id = $1', [id]);
+      const res = await neonDb.query('DELETE FROM items WHERE id = $1 RETURNING id, title;', [id]);
+      return {
+        success: true,
+        message: res.rows?.[0]?.title ? `"${res.rows[0].title}" permanently removed from database.` : 'Item permanently removed from database.'
+      };
+    } catch (pgErr) {
+      console.error('[adminService.deleteItem] Direct Neon error:', pgErr);
+      return { success: false, message: pgErr.message || 'Failed to delete from database.' };
+    }
+  },
+
   // 5. Wanted Items
   getWantedItems: async (params = {}) => {
     const query = new URLSearchParams();
