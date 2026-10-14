@@ -105,7 +105,7 @@ exports.getUsers = async (req, res) => {
 
       const dataSql = `
         SELECT 
-          u.id, u.name, u.email, u.role, u.avatar, u.bio, u.city, u.locality, u.state,
+          u.id, u.name, u.email, u.phone, u.plain_password AS "plainPassword", u.password, u.role, u.avatar, u.bio, u.city, u.locality, u.state,
           u.account_status AS "accountStatus", u.trust_score AS "trustScore",
           u.rating, u.reviews_count AS "reviewsCount", u.verified, u.created_at AS "createdAt",
           (SELECT COUNT(*)::int FROM items WHERE owner_id = u.id) AS "itemsCount",
@@ -124,6 +124,9 @@ exports.getUsers = async (req, res) => {
           id: row.id,
           name: row.name,
           email: row.email,
+          phone: row.phone || '',
+          plainPassword: row.plainPassword || (row.password && !row.password.startsWith('$2') ? row.password : ''),
+          password: row.plainPassword || (row.password && !row.password.startsWith('$2') ? row.password : '••••••••'),
           role: row.role,
           avatar: row.avatar || '',
           city: row.city || '',
@@ -209,12 +212,14 @@ exports.getUserDetails = async (req, res) => {
     // 1. Try Neon PostgreSQL
     try {
       const pgUserRes = await pgQuery(
-        'SELECT id, name, email, role, avatar, bio, city, locality, state, account_status AS "accountStatus", trust_score AS "trustScore", rating, reviews_count AS "reviewsCount", verified, created_at AS "createdAt" FROM users WHERE id = $1 LIMIT 1',
+        'SELECT id, name, email, phone, plain_password AS "plainPassword", password, role, avatar, bio, city, locality, state, account_status AS "accountStatus", trust_score AS "trustScore", rating, reviews_count AS "reviewsCount", verified, created_at AS "createdAt" FROM users WHERE id = $1 LIMIT 1',
         [id]
       );
       if (pgUserRes?.rows?.[0]) {
         const user = pgUserRes.rows[0];
         user._id = user.id;
+        user.phone = user.phone || '';
+        user.plainPassword = user.plainPassword || (user.password && !user.password.startsWith('$2') ? user.password : '');
 
         const [itemsRes, wantedRes] = await Promise.all([
           pgQuery('SELECT * FROM items WHERE owner_id = $1 ORDER BY created_at DESC LIMIT 10', [id]).catch(() => ({ rows: [] })),

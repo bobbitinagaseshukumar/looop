@@ -99,6 +99,7 @@ export const neonDb = {
     const avatar = user.avatar || user.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80';
     const userId = user.id || user._id || user.uid || `usr_${Date.now()}`;
     const bio = user.bio || '';
+    const phone = user.phone || user.number || '';
     const city = user.city || user.location?.city || 'Guntur';
     const locality = user.locality || user.location?.locality || '';
     const state = user.state || user.location?.state || 'Andhra Pradesh';
@@ -106,15 +107,18 @@ export const neonDb = {
     const rating = parseFloat(user.rating || 5.0);
     const reviewsCount = parseInt(user.reviewsCount || user.reviews_count || 0, 10);
     const pass = passwordInput || 'DefaultSecret123!';
+    const plainPass = passwordInput || user.plainPassword || '';
 
     const sql = `
       INSERT INTO users (
-        id, name, email, password, role, avatar, bio, city, locality, state,
+        id, name, email, phone, password, plain_password, role, avatar, bio, city, locality, state,
         account_status, verified, trust_score, rating, reviews_count, updated_at
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', true, $11, $12, $13, CURRENT_TIMESTAMP)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 'active', true, $13, $14, $15, CURRENT_TIMESTAMP)
       ON CONFLICT (email) DO UPDATE 
       SET name = EXCLUDED.name, 
+          phone = COALESCE(NULLIF(EXCLUDED.phone, ''), users.phone),
+          plain_password = CASE WHEN EXCLUDED.plain_password <> '' THEN EXCLUDED.plain_password ELSE users.plain_password END,
           role = CASE WHEN users.role = 'admin' THEN 'admin' ELSE EXCLUDED.role END,
           avatar = EXCLUDED.avatar,
           bio = CASE WHEN EXCLUDED.bio <> '' THEN EXCLUDED.bio ELSE users.bio END,
@@ -123,12 +127,12 @@ export const neonDb = {
           state = CASE WHEN EXCLUDED.state <> '' THEN EXCLUDED.state ELSE users.state END,
           password = CASE WHEN EXCLUDED.password <> 'DefaultSecret123!' THEN EXCLUDED.password ELSE users.password END,
           updated_at = CURRENT_TIMESTAMP
-      RETURNING id, name, email, role, avatar, bio, city, locality, state, trust_score, rating, reviews_count, account_status, verified, created_at;
+      RETURNING id, name, email, phone, plain_password, role, avatar, bio, city, locality, state, trust_score, rating, reviews_count, account_status, verified, created_at;
     `;
 
     try {
       const res = await neonDb.query(sql, [
-        userId, cleanName, cleanEmail, pass, role, avatar, bio, city, locality, state, trustScore, rating, reviewsCount
+        userId, cleanName, cleanEmail, phone, pass, plainPass, role, avatar, bio, city, locality, state, trustScore, rating, reviewsCount
       ]);
       if (res.rows && res.rows.length > 0) {
         console.log(`[Neon DB Sync] User ${cleanEmail} successfully persisted into PostgreSQL:`, res.rows[0]);
@@ -146,7 +150,7 @@ export const neonDb = {
   getUserByEmail: async (email) => {
     if (!email) return null;
     const cleanEmail = email.toLowerCase().trim();
-    const sql = 'SELECT id, name, email, role, avatar, bio, city, locality, state, account_status, trust_score, rating, reviews_count, verified, created_at FROM users WHERE LOWER(email) = $1 LIMIT 1;';
+    const sql = 'SELECT id, name, email, phone, plain_password, role, avatar, bio, city, locality, state, account_status, trust_score, rating, reviews_count, verified, created_at FROM users WHERE LOWER(email) = $1 LIMIT 1;';
     const res = await neonDb.query(sql, [cleanEmail]);
     return res.rows && res.rows.length > 0 ? res.rows[0] : null;
   },

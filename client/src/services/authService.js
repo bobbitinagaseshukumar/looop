@@ -565,11 +565,14 @@ export const authService = {
       cleanEmail.includes('admin') ||
       cleanEmail === 'admin@looop.community';
 
+    const cleanPhone = (userData.phone || userData.number || '').trim();
+
     const newUser = {
       id: `usr_${Date.now()}`,
       _id: `usr_${Date.now()}`,
       name: cleanName || 'Community Member',
       email: cleanEmail,
+      phone: cleanPhone,
       role: isAdmin ? 'admin' : 'customer',
       trustScore: 100,
       rating: 5.0,

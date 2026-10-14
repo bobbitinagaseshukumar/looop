@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   User,
+  Phone,
   Mail,
   Lock,
   Eye,
@@ -35,6 +36,7 @@ export const RegisterPage = () => {
 
   // Form State
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -289,6 +291,7 @@ export const RegisterPage = () => {
       // 2. Perform account registration & save directly to Neon PostgreSQL Cloud DB
       const res = await authService.register({
         name: name.trim(),
+        phone: phone.trim(),
         email: email.trim(),
         password
       });
@@ -731,6 +734,54 @@ export const RegisterPage = () => {
                       {errors.name}
                     </span>
                   )}
+                </div>
+
+                {/* Mobile / Phone Number Field */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100%', boxSizing: 'border-box' }}>
+                  <label
+                    htmlFor="register-phone"
+                    style={{
+                      fontSize: '0.825rem',
+                      fontWeight: 600,
+                      color: '#334155'
+                    }}
+                  >
+                    Mobile / Phone Number
+                  </label>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%', boxSizing: 'border-box' }}>
+                    <span
+                      style={{
+                        position: 'absolute',
+                        left: '12px',
+                        color: '#94a3b8',
+                        pointerEvents: 'none',
+                        display: 'flex',
+                        alignItems: 'center'
+                      }}
+                    >
+                      <Phone size={17} />
+                    </span>
+                    <input
+                      id="register-phone"
+                      type="tel"
+                      autoComplete="tel"
+                      placeholder="e.g. +91 98765 43210"
+                      value={phone}
+                      onChange={(e) => setPhone(e.target.value)}
+                      style={{
+                        width: '100%',
+                        boxSizing: 'border-box',
+                        padding: '10px 12px 10px 38px',
+                        fontSize: '0.9rem',
+                        borderRadius: '12px',
+                        border: '1.5px solid #cbd5e1',
+                        backgroundColor: '#ffffff',
+                        color: '#0f172a',
+                        outline: 'none'
+                      }}
+                      disabled={isSubmitting}
+                    />
+                  </div>
                 </div>
 
                 {/* Email Address Field with Real-Time Validation & Inline OTP Verification */}

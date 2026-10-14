@@ -5,6 +5,11 @@ import {
   UserCheck,
   UserX,
   Eye,
+  EyeOff,
+  Phone,
+  Key,
+  Copy,
+  Check,
   Search,
   Filter,
   CheckCircle,
@@ -30,6 +35,10 @@ export const AdminUsersPage = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [notification, setNotification] = useState(null);
+
+  // Password Visibility & Copy State
+  const [visiblePasswords, setVisiblePasswords] = useState({});
+  const [copiedId, setCopiedId] = useState(null);
 
   // User Details Modal State
   const [selectedUser, setSelectedUser] = useState(null);
@@ -130,6 +139,84 @@ export const AdminUsersPage = () => {
           </div>
         </div>
       )
+    },
+    {
+      header: 'Mobile / Phone',
+      accessor: 'phone',
+      render: (u) => (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.8rem', color: u.phone ? '#f1f5f9' : '#64748b' }}>
+          <Phone size={13} style={{ color: u.phone ? '#10b981' : '#64748b', flexShrink: 0 }} />
+          <span>{u.phone || '—'}</span>
+        </div>
+      )
+    },
+    {
+      header: 'Password',
+      render: (u) => {
+        const isVisible = !!visiblePasswords[u._id];
+        const pwd = u.plainPassword || u.password || '••••••••';
+        const isCopied = copiedId === u._id;
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span
+              style={{
+                fontFamily: isVisible ? 'monospace' : 'inherit',
+                fontSize: '0.8rem',
+                color: isVisible ? '#38bdf8' : '#94a3b8',
+                backgroundColor: 'rgba(15, 23, 42, 0.7)',
+                border: '1px solid #334155',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                maxWidth: '120px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontWeight: isVisible ? 600 : 400
+              }}
+            >
+              {isVisible ? pwd : '••••••••'}
+            </span>
+            <button
+              type="button"
+              title={isVisible ? 'Hide Password' : 'Show Password'}
+              onClick={() => setVisiblePasswords(prev => ({ ...prev, [u._id]: !prev[u._id] }))}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: isVisible ? '#38bdf8' : '#64748b',
+                cursor: 'pointer',
+                padding: '3px',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+            >
+              {isVisible ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+            {(u.plainPassword || (u.password && !u.password.startsWith('$2'))) && (
+              <button
+                type="button"
+                title="Copy Password"
+                onClick={() => {
+                  navigator.clipboard.writeText(u.plainPassword || u.password);
+                  setCopiedId(u._id);
+                  setTimeout(() => setCopiedId(null), 2000);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: isCopied ? '#10b981' : '#64748b',
+                  cursor: 'pointer',
+                  padding: '3px',
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                {isCopied ? <Check size={13} /> : <Copy size={13} />}
+              </button>
+            )}
+          </div>
+        );
+      }
     },
     {
       header: 'Role',
@@ -399,6 +486,61 @@ export const AdminUsersPage = () => {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', fontSize: '0.875rem' }}>
+                {/* Customer Account & Authentication Credentials */}
+                <div style={{ backgroundColor: '#0f172a', padding: '16px', borderRadius: 'var(--radius-sm)', border: '1px solid #334155' }}>
+                  <h3 style={{ fontSize: '0.875rem', fontWeight: 700, color: '#38bdf8', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Key size={15} /> Customer Account & Login Credentials
+                  </h3>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '0.75rem', display: 'block' }}>Full Name</span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{selectedUser.name}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '0.75rem', display: 'block' }}>Email Address</span>
+                      <span style={{ color: '#f8fafc', fontWeight: 600 }}>{selectedUser.email}</span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '0.75rem', display: 'block' }}>Mobile / Phone Number</span>
+                      <span style={{ color: (selectedUser.phone || userDetailsData?.user?.phone) ? '#10b981' : '#94a3b8', fontWeight: 600 }}>
+                        {selectedUser.phone || userDetailsData?.user?.phone || 'Not provided'}
+                      </span>
+                    </div>
+                    <div>
+                      <span style={{ color: '#64748b', fontSize: '0.75rem', display: 'block' }}>Account Password</span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px' }}>
+                        <span style={{ color: '#38bdf8', fontFamily: 'monospace', fontSize: '0.85rem', fontWeight: 600 }}>
+                          {visiblePasswords['modal']
+                            ? (selectedUser.plainPassword || userDetailsData?.user?.plainPassword || selectedUser.password || '••••••••')
+                            : '••••••••'}
+                        </span>
+                        <button
+                          type="button"
+                          title={visiblePasswords['modal'] ? 'Hide' : 'Show'}
+                          onClick={() => setVisiblePasswords(prev => ({ ...prev, modal: !prev.modal }))}
+                          style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: 0 }}
+                        >
+                          {visiblePasswords['modal'] ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                        {(selectedUser.plainPassword || userDetailsData?.user?.plainPassword) && (
+                          <button
+                            type="button"
+                            title="Copy Password"
+                            onClick={() => {
+                              navigator.clipboard.writeText(selectedUser.plainPassword || userDetailsData?.user?.plainPassword);
+                              setCopiedId('modal');
+                              setTimeout(() => setCopiedId(null), 2000);
+                            }}
+                            style={{ background: 'none', border: 'none', color: copiedId === 'modal' ? '#10b981' : '#94a3b8', cursor: 'pointer', padding: 0 }}
+                          >
+                            {copiedId === 'modal' ? <Check size={14} /> : <Copy size={14} />}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Profile Overview */}
                 <div style={{ backgroundColor: '#0f172a', padding: '14px', borderRadius: 'var(--radius-sm)' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>

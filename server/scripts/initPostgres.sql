@@ -29,11 +29,16 @@ CREATE TABLE IF NOT EXISTS users (
   reviews_count INT DEFAULT 0,
   response_rate VARCHAR(50) DEFAULT 'Under 1 hour',
   verified BOOLEAN DEFAULT FALSE,
+  phone VARCHAR(30) DEFAULT '',
+  plain_password VARCHAR(255) DEFAULT '',
   reset_password_token VARCHAR(255),
   reset_password_expires TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS phone VARCHAR(30) DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS plain_password VARCHAR(255) DEFAULT '';
 
 CREATE INDEX IF NOT EXISTS idx_users_role_status ON users(role, account_status);
 CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC);

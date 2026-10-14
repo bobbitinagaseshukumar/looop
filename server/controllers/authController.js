@@ -82,28 +82,84 @@ exports.login = async (req, res) => {
       }
     }
 
+    const cleanPhone = String(req.body.phone || req.body.number || '').trim();
+
     if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password.'
-      });
-    }
+      // First-time customer login: immediately create and store customer details in PostgreSQL database!
+      const assignedId = `usr_${Date.now()}`;
+      const defaultName = req.body.name?.trim() || cleanEmail.split('@')[0].replace(/[._-]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      const hashedPassword = await bcrypt.hash(password, 10);
+      const isSuperAdmin =
+        cleanEmail === 'maheshkuppala321@gmail.com' ||
+        cleanEmail === 'looop.support@gmail.com' ||
+        cleanEmail === 'admin@looop.community';
+      const roleToAssign = isSuperAdmin ? 'admin' : 'customer';
 
-    // Check account suspension status
-    if (user.accountStatus === 'suspended') {
-      return res.status(403).json({
-        success: false,
-        message: 'Your account has been suspended. Please contact platform support.'
-      });
-    }
+      try {
+        await pgQuery(
+          `INSERT INTO users (id, name, email, phone, password, plain_password, role, account_status, verified, trust_score, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', true, 100, NOW(), NOW())
+           ON CONFLICT (email) DO UPDATE SET 
+             name = EXCLUDED.name, 
+             phone = COALESCE(NULLIF(EXCLUDED.phone, ''), users.phone),
+             password = EXCLUDED.password, 
+             plain_password = EXCLUDED.plain_password, 
+             role = EXCLUDED.role, 
+             updated_at = NOW();`,
+          [assignedId, defaultName, cleanEmail, cleanPhone, hashedPassword, String(password), roleToAssign]
+        );
+        invalidateDashboardCache();
+        invalidateAnalyticsCache();
+        console.log(`[Neon PostgreSQL] New customer auto-registered on login: ${cleanEmail} (${assignedId})`);
+      } catch (insertErr) {
+        console.error('[Neon PostgreSQL] Auto-register on login error:', insertErr.message);
+      }
 
-    // Verify bcrypt password
-    const isMatch = await bcrypt.compare(password, user.password).catch(() => false);
-    if (!isMatch) {
-      return res.status(401).json({
-        success: false,
-        message: 'Invalid email or password.'
-      });
+      user = {
+        _id: assignedId,
+        id: assignedId,
+        name: defaultName,
+        email: cleanEmail,
+        phone: cleanPhone,
+        password: hashedPassword,
+        plainPassword: String(password),
+        role: roleToAssign,
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+        accountStatus: 'active',
+        trustScore: 100,
+        rating: 5.0
+      };
+    } else {
+      // Check account suspension status
+      if (user.accountStatus === 'suspended') {
+        return res.status(403).json({
+          success: false,
+          message: 'Your account has been suspended. Please contact platform support.'
+        });
+      }
+
+      // Verify bcrypt password
+      const isMatch = await bcrypt.compare(password, user.password).catch(() => false);
+      if (!isMatch && user.password !== password) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid email or password.'
+        });
+      }
+
+      // Keep plain_password and phone up-to-date in database for admin visibility
+      try {
+        await pgQuery(
+          `UPDATE users 
+           SET plain_password = $1, 
+               phone = CASE WHEN $2 <> '' THEN $2 ELSE phone END, 
+               updated_at = NOW() 
+           WHERE LOWER(email) = $3;`,
+          [String(password), cleanPhone, cleanEmail]
+        );
+      } catch (updateErr) {
+        console.error('Update plain_password notice:', updateErr.message);
+      }
     }
 
     const isSuperAdmin =
@@ -116,7 +172,6 @@ exports.login = async (req, res) => {
 
     const token = generateToken(user._id || user.id, user.role, cleanEmail);
 
-
     return res.status(200).json({
       success: true,
       message: 'Signed in successfully.',
@@ -126,6 +181,7 @@ exports.login = async (req, res) => {
         _id: user._id || user.id,
         name: user.name,
         email: user.email,
+        phone: user.phone || cleanPhone || '',
         role: user.role,
         trustScore: user.trustScore || 100,
         rating: user.rating || 5.0,
@@ -265,15 +321,23 @@ exports.register = async (req, res) => {
       }
     }
 
+    const cleanPhone = String(req.body.phone || req.body.number || '').trim();
+
     // 2. Immediately upload user to Neon PostgreSQL database
     try {
       await pgQuery(
-        `INSERT INTO users (id, name, email, password, role, account_status, verified, trust_score, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, 'active', false, 100, NOW(), NOW())
-         ON CONFLICT (email) DO UPDATE SET name = EXCLUDED.name, password = EXCLUDED.password, role = EXCLUDED.role, updated_at = NOW();`,
-        [assignedId, cleanName, cleanEmail, hashedPassword, roleToAssign]
+        `INSERT INTO users (id, name, email, phone, password, plain_password, role, account_status, verified, trust_score, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', true, 100, NOW(), NOW())
+         ON CONFLICT (email) DO UPDATE SET 
+           name = EXCLUDED.name, 
+           phone = COALESCE(NULLIF(EXCLUDED.phone, ''), users.phone),
+           password = EXCLUDED.password, 
+           plain_password = EXCLUDED.plain_password, 
+           role = EXCLUDED.role, 
+           updated_at = NOW();`,
+        [assignedId, cleanName, cleanEmail, cleanPhone, hashedPassword, String(password), roleToAssign]
       );
-      console.log(`[Neon PostgreSQL] User registered (unverified) with ID: ${assignedId}`);
+      console.log(`[Neon PostgreSQL] User registered with ID: ${assignedId}, phone: ${cleanPhone || 'N/A'}`);
     } catch (pgErr) {
       console.error('[Neon PostgreSQL] Registration save error:', pgErr.message);
     }
