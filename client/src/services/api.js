@@ -107,16 +107,43 @@ apiClient.interceptors.response.use(
           }
         }
       } else {
-        message = error.response.data?.message || error.response.data?.error || `Server responded with status ${error.response.status}`;
+        const data = error.response.data;
+        if (typeof data === 'string' && data.trim()) {
+          message = data;
+        } else if (data && typeof data === 'object') {
+          if (typeof data.message === 'string' && data.message.trim() && data.message !== '[object Object]') {
+            message = data.message;
+          } else if (typeof data.error === 'string' && data.error.trim() && data.error !== '[object Object]') {
+            message = data.error;
+          } else if (data.error && typeof data.error.message === 'string') {
+            message = data.error.message;
+          } else if (data.message && typeof data.message === 'object') {
+            message = data.message.message || data.message.text || JSON.stringify(data.message);
+          } else if (Array.isArray(data.errors) && data.errors.length > 0) {
+            const first = data.errors[0];
+            message = typeof first === 'string' ? first : (first.msg || first.message || JSON.stringify(first));
+          } else if (data.errors && typeof data.errors === 'object') {
+            const vals = Object.values(data.errors);
+            if (vals.length > 0) {
+              const first = vals[0];
+              message = typeof first === 'string' ? first : (first.msg || first.message || JSON.stringify(first));
+            }
+          } else {
+            message = `Server responded with status ${error.response.status}`;
+          }
+        } else {
+          message = `Server responded with status ${error.response.status}`;
+        }
       }
     } else if (error.request) {
       // Request was made but no response received (server down or CORS issue)
       message = 'Cannot connect to LOOOP server. Please ensure the backend is running.';
     } else {
-      message = error.message;
+      message = (typeof error.message === 'string' && error.message !== '[object Object]') ? error.message : 'An unexpected error occurred.';
     }
 
-    const enhancedError = new Error(message);
+    const cleanMessage = (typeof message === 'string' && message !== '[object Object]') ? message : 'An unexpected error occurred.';
+    const enhancedError = new Error(cleanMessage);
     enhancedError.status = error.response?.status || 0;
     enhancedError.data = error.response?.data || null;
 

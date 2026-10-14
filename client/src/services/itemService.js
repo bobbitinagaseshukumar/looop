@@ -396,11 +396,26 @@ export const itemService = {
         };
       }
       if (response.data && !response.data.success) {
-        apiErrorMsg = response.data.message || 'Server rejected listing publication.';
+        const dataMsg = response.data.message;
+        apiErrorMsg = typeof dataMsg === 'string' && dataMsg !== '[object Object]'
+          ? dataMsg
+          : (dataMsg?.message || response.data.error || 'Server rejected listing publication.');
       }
     } catch (err) {
       console.warn('[itemService.createItem] REST API call notice:', err.message);
-      apiErrorMsg = err.response?.data?.message || err.message || '';
+      const rawData = err.data || err.response?.data;
+      if (rawData && typeof rawData === 'object') {
+        if (typeof rawData.message === 'string' && rawData.message !== '[object Object]') {
+          apiErrorMsg = rawData.message;
+        } else if (typeof rawData.error === 'string' && rawData.error !== '[object Object]') {
+          apiErrorMsg = rawData.error;
+        } else if (rawData.error?.message) {
+          apiErrorMsg = rawData.error.message;
+        }
+      }
+      if (!apiErrorMsg && typeof err.message === 'string' && err.message !== '[object Object]') {
+        apiErrorMsg = err.message;
+      }
     }
 
     // 2. Direct Neon PostgreSQL Cloud Database Fallback
@@ -427,11 +442,18 @@ export const itemService = {
       }
     } catch (neonErr) {
       console.error('[itemService.createItem] Direct Neon database save error:', neonErr.message);
+      if (!apiErrorMsg && typeof neonErr.message === 'string' && neonErr.message !== '[object Object]') {
+        apiErrorMsg = neonErr.message;
+      }
     }
+
+    const fallbackMsg = (apiErrorMsg && typeof apiErrorMsg === 'string' && apiErrorMsg !== '[object Object]')
+      ? apiErrorMsg
+      : 'We couldn’t publish your item right now. Please try again.';
 
     return {
       success: false,
-      message: apiErrorMsg || 'We couldn’t publish your item right now. Please try again.'
+      message: fallbackMsg
     };
   },
 

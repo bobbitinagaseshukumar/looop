@@ -501,7 +501,11 @@ export const ShareItemPage = () => {
           variant: 'success'
         });
       } else {
-        const msg = response?.message || 'We couldn’t publish your item right now. Please try again.';
+        let msg = response?.message;
+        if (!msg || typeof msg !== 'string' || msg === '[object Object]') {
+          msg = typeof msg === 'object' ? (msg?.message || msg?.error || JSON.stringify(msg)) : 'We couldn’t publish your item right now. Please try again.';
+        }
+        if (msg === '[object Object]') msg = 'We couldn’t publish your item right now. Please try again.';
         setErrorMessage(msg);
         setFormStatus('error');
         addToast({
@@ -512,7 +516,11 @@ export const ShareItemPage = () => {
       }
     } catch (err) {
       console.error('Publish item error:', err);
-      const msg = err?.message || 'We couldn’t publish your item right now. Please try again.';
+      let msg = err?.message;
+      if (!msg || typeof msg !== 'string' || msg === '[object Object]') {
+        msg = typeof msg === 'object' ? (msg?.message || msg?.error || JSON.stringify(msg)) : 'We couldn’t publish your item right now. Please try again.';
+      }
+      if (msg === '[object Object]') msg = 'We couldn’t publish your item right now. Please try again.';
       setErrorMessage(msg);
       setFormStatus('error');
       addToast({
