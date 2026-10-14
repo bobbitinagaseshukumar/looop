@@ -6,6 +6,7 @@ const uploadRulesService = require('../services/uploadRulesService');
 const { query: pgQuery } = require('../config/postgres');
 const { invalidateDashboardCache } = require('../services/adminDashboardService');
 const { invalidateAnalyticsCache } = require('../services/adminAnalyticsService');
+const { clearAdminItemsCache } = require('./adminController');
 
 /**
  * GET /api/items/upload-rules
@@ -400,7 +401,19 @@ exports.createItem = async (req, res) => {
       console.error('[Neon PostgreSQL] Error saving item:', pgErr.message);
     }
 
-    // 8. Invalidate admin profile and admin dashboard caches so numbers update/increment instantly
+    // 8. If customer provided or confirmed contact phone, persist it to customer account table in PostgreSQL
+    const contactPhone = String(req.body.phone || req.body.contactPhone || '').trim();
+    if (contactPhone && resolvedOwnerId) {
+      try {
+        await pgQuery("UPDATE users SET phone = $1, updated_at = NOW() WHERE id = $2 AND (phone IS NULL OR phone = '' OR phone != $1);", [contactPhone, resolvedOwnerId]);
+        console.log(`[Neon PostgreSQL] Customer phone updated to: ${contactPhone} for user ${resolvedOwnerId}`);
+      } catch (phoneErr) {
+        console.warn('[itemController] user phone update notice:', phoneErr.message);
+      }
+    }
+
+    // Invalidate admin caches so numbers and product lists refresh immediately
+    clearAdminItemsCache();
     invalidateDashboardCache();
     invalidateAnalyticsCache();
 

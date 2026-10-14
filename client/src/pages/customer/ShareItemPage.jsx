@@ -88,6 +88,13 @@ export const ShareItemPage = () => {
   const [availability, setAvailability] = useState('Available');
   const [optionalYear, setOptionalYear] = useState('');
   const [optionalColor, setOptionalColor] = useState('');
+  const [contactPhone, setContactPhone] = useState(() => user?.phone || '');
+
+  useEffect(() => {
+    if (user?.phone && !contactPhone) {
+      setContactPhone(user.phone);
+    }
+  }, [user?.phone]);
 
   // Multi-Step & Validation State
   const [currentStep, setCurrentStep] = useState(1);
@@ -458,6 +465,7 @@ export const ShareItemPage = () => {
         images,
         sharingType,
         condition,
+        phone: contactPhone.trim(),
         location: {
           city: city.trim(),
           locality: locality.trim(),
@@ -1291,6 +1299,14 @@ export const ShareItemPage = () => {
                       value={locality}
                       onChange={(e) => setLocality(e.target.value)}
                       helperText="Do not enter apartment numbers or street names."
+                    />
+
+                    <Input
+                      label="Contact Number (Saved to Customer Account)"
+                      placeholder="e.g. +91 98765 43210"
+                      value={contactPhone}
+                      onChange={(e) => setContactPhone(e.target.value)}
+                      helperText="Stored in database and displayed in admin panel."
                     />
                   </div>
 

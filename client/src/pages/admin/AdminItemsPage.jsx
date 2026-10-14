@@ -30,14 +30,27 @@ let persistentTotalPages = 1;
 let itemsAlreadyLoaded = false;
 let wantedAlreadyLoaded = false;
 
+// Clear old cache keys once to ensure deleted products are removed immediately
+try {
+  localStorage.removeItem('looop_admin_items_cache');
+  localStorage.removeItem('looop_admin_items_total');
+} catch {}
+
+const getItemImageUrl = (item) => {
+  const first = item?.images?.[0];
+  if (!first) return 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=100';
+  if (typeof first === 'string') return first;
+  return first.url || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=100';
+};
+
 export const AdminItemsPage = () => {
   const [activeTab, setActiveTab] = useState('items'); // 'items' | 'wanted'
   const [items, setItems] = useState(() => {
-    if (persistentItems && persistentItems.length > 0) return persistentItems;
+    if (persistentItems) return persistentItems;
     try {
-      const cached = localStorage.getItem('looop_admin_items_cache');
-      const parsed = cached ? JSON.parse(cached) : [];
-      if (parsed.length > 0) {
+      const cached = localStorage.getItem('looop_admin_items_cache_v3');
+      const parsed = cached ? JSON.parse(cached) : null;
+      if (parsed) {
         persistentItems = parsed;
         itemsAlreadyLoaded = true;
         return parsed;
@@ -47,9 +60,9 @@ export const AdminItemsPage = () => {
   });
   const [wantedItems, setWantedItems] = useState(() => persistentWanted || []);
   const [total, setTotal] = useState(() => {
-    if (persistentTotal > 0) return persistentTotal;
+    if (persistentTotal >= 0 && itemsAlreadyLoaded) return persistentTotal;
     try {
-      const cached = localStorage.getItem('looop_admin_items_total');
+      const cached = localStorage.getItem('looop_admin_items_total_v3');
       return cached ? parseInt(cached, 10) : 0;
     } catch {
       return 0;
@@ -62,7 +75,7 @@ export const AdminItemsPage = () => {
   const [statusFilter, setStatusFilter] = useState('');
   const [sharingTypeFilter, setSharingTypeFilter] = useState('');
   const [isLoading, setIsLoading] = useState(() => {
-    if (itemsAlreadyLoaded || (persistentItems && persistentItems.length > 0)) {
+    if (itemsAlreadyLoaded && persistentItems) {
       return false;
     }
     return true;
@@ -103,8 +116,8 @@ export const AdminItemsPage = () => {
           itemsAlreadyLoaded = true;
           if (page === 1 && !search && !categoryFilter && !sharingTypeFilter && !statusFilter) {
             try {
-              localStorage.setItem('looop_admin_items_cache', JSON.stringify(list));
-              localStorage.setItem('looop_admin_items_total', String(res.data.total || 0));
+              localStorage.setItem('looop_admin_items_cache_v3', JSON.stringify(list));
+              localStorage.setItem('looop_admin_items_total_v3', String(res.data.total || 0));
             } catch {}
           }
         }
@@ -228,9 +241,13 @@ export const AdminItemsPage = () => {
       render: (item) => (
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <img
-            src={item.images?.[0]?.url || 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=100'}
+            src={getItemImageUrl(item)}
             alt=""
-            style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-xs)', objectFit: 'cover' }}
+            onError={(e) => {
+              e.currentTarget.onerror = null;
+              e.currentTarget.src = 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=100';
+            }}
+            style={{ width: '40px', height: '40px', borderRadius: 'var(--radius-xs)', objectFit: 'cover', flexShrink: 0 }}
           />
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             <span style={{ fontWeight: 600, color: '#f8fafc' }}>{item.title}</span>
@@ -245,9 +262,17 @@ export const AdminItemsPage = () => {
       header: 'Owner',
       accessor: 'owner',
       render: (item) => (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Avatar src={item.owner?.avatar} name={item.owner?.name || 'User'} size="xs" />
-          <span style={{ color: '#cbd5e1', fontSize: '0.825rem' }}>{item.owner?.name || 'Owner'}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Avatar src={item.owner?.avatar} name={item.owner?.name || 'User'} size="xs" />
+            <span style={{ color: '#cbd5e1', fontSize: '0.825rem', fontWeight: 600 }}>{item.owner?.name || 'Owner'}</span>
+          </div>
+          {item.owner?.phone && (
+            <span style={{ color: '#34d399', fontSize: '0.72rem', paddingLeft: '28px', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <span>📞</span>
+              <span>{item.owner.phone}</span>
+            </span>
+          )}
         </div>
       )
     },
@@ -712,14 +737,21 @@ export const AdminItemsPage = () => {
                 {/* Images Preview */}
                 {detailsItem.images?.length > 0 && (
                   <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
-                    {detailsItem.images.map((img, i) => (
-                      <img
-                        key={i}
-                        src={img.url}
-                        alt=""
-                        style={{ width: '80px', height: '80px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }}
-                      />
-                    ))}
+                    {detailsItem.images.map((img, i) => {
+                      const imgUrl = typeof img === 'string' ? img : (img?.url || '');
+                      return (
+                        <img
+                          key={i}
+                          src={imgUrl}
+                          alt=""
+                          onError={(e) => {
+                            e.currentTarget.onerror = null;
+                            e.currentTarget.src = 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=100';
+                          }}
+                          style={{ width: '80px', height: '80px', borderRadius: 'var(--radius-sm)', objectFit: 'cover' }}
+                        />
+                      );
+                    })}
                   </div>
                 )}
 
@@ -752,6 +784,11 @@ export const AdminItemsPage = () => {
                     <span style={{ color: '#f8fafc', display: 'block' }}>
                       {detailsItem.owner?.name} ({detailsItem.owner?.email})
                     </span>
+                    {detailsItem.owner?.phone && (
+                      <span style={{ color: '#34d399', fontSize: '0.75rem', display: 'block', marginTop: '2px' }}>
+                        📞 Phone: {detailsItem.owner.phone}
+                      </span>
+                    )}
                   </div>
                 </div>
 

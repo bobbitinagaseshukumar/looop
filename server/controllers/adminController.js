@@ -374,6 +374,11 @@ exports.updateUserStatus = async (req, res) => {
 const adminItemsCache = new Map();
 const ADMIN_ITEMS_CACHE_TTL = 15000;
 
+const clearAdminItemsCache = () => {
+  adminItemsCache.clear();
+};
+exports.clearAdminItemsCache = clearAdminItemsCache;
+
 exports.getItems = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -432,6 +437,7 @@ exports.getItems = async (req, res) => {
             '_id', u.id,
             'name', COALESCE(u.name, 'Community Member'),
             'email', COALESCE(u.email, ''),
+            'phone', COALESCE(u.phone, ''),
             'avatar', COALESCE(u.avatar, ''),
             'trustScore', COALESCE(u.trust_score, 95)
           ) as owner,
@@ -560,8 +566,46 @@ exports.getItems = async (req, res) => {
 exports.getItemDetails = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // 1. Try PostgreSQL lookup first
+    try {
+      const pgRes = await pgQuery(`
+        SELECT i.*, 
+          json_build_object(
+            'id', u.id,
+            '_id', u.id,
+            'name', COALESCE(u.name, 'Community Member'),
+            'email', COALESCE(u.email, ''),
+            'phone', COALESCE(u.phone, ''),
+            'avatar', COALESCE(u.avatar, ''),
+            'trustScore', COALESCE(u.trust_score, 95),
+            'accountStatus', COALESCE(u.account_status, 'active')
+          ) as owner
+        FROM items i
+        LEFT JOIN users u ON i.owner_id = u.id
+        WHERE i.id = $1 LIMIT 1;
+      `, [id]);
+      if (pgRes?.rows?.[0]) {
+        const item = pgRes.rows[0];
+        item._id = item.id;
+        item.images = Array.isArray(item.images) ? item.images : JSON.parse(item.images || '[]');
+        return res.status(200).json({
+          success: true,
+          data: {
+            item,
+            requestsCount: 0,
+            hasActiveTransaction: false,
+            activeTransaction: null,
+            reports: []
+          }
+        });
+      }
+    } catch (pgErr) {
+      console.warn('[getItemDetails] PostgreSQL check notice:', pgErr.message);
+    }
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid item ID format.' });
+      return res.status(404).json({ success: false, message: 'Item not found.' });
     }
 
     const item = await Item.findById(id).populate('owner', 'name email avatar trustScore accountStatus').lean();
@@ -602,12 +646,50 @@ exports.moderateItem = async (req, res) => {
     const { id } = req.params;
     const { action, reason = '' } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid item ID format.' });
-    }
-
     if (!['hide', 'remove', 'restore'].includes(action)) {
       return res.status(400).json({ success: false, message: 'Action must be hide, remove, or restore.' });
+    }
+
+    // 1. Try PostgreSQL first
+    try {
+      const pgCheck = await pgQuery('SELECT id, title, status, availability, owner_id FROM items WHERE id = $1 LIMIT 1', [id]);
+      if (pgCheck?.rows?.[0]) {
+        const pgItem = pgCheck.rows[0];
+        let newStatus = pgItem.status;
+        let newAvailability = pgItem.availability;
+        if (action === 'hide') {
+          newStatus = 'suspended';
+          newAvailability = 'Unavailable';
+        } else if (action === 'remove') {
+          newStatus = 'removed';
+          newAvailability = 'Unavailable';
+        } else if (action === 'restore') {
+          newStatus = 'active';
+          newAvailability = 'Available';
+        }
+
+        await pgQuery('UPDATE items SET status = $1, availability = $2, updated_at = NOW() WHERE id = $3', [newStatus, newAvailability, id]);
+        clearAdminItemsCache();
+        adminDashboardService.invalidateDashboardCache();
+        adminAnalyticsService.invalidateAnalyticsCache();
+
+        return res.status(200).json({
+          success: true,
+          message: `Item has been successfully ${action === 'restore' ? 'restored' : action === 'hide' ? 'hidden' : 'removed'}.`,
+          item: {
+            id: pgItem.id,
+            title: pgItem.title,
+            status: newStatus,
+            availability: newAvailability
+          }
+        });
+      }
+    } catch (pgErr) {
+      console.warn('[moderateItem] PG notice:', pgErr.message);
+    }
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(404).json({ success: false, message: 'Item not found.' });
     }
 
     const item = await Item.findById(id);
@@ -651,9 +733,13 @@ exports.moderateItem = async (req, res) => {
     item.availability = newAvailability;
     await item.save();
 
+    clearAdminItemsCache();
+    adminDashboardService.invalidateDashboardCache();
+    adminAnalyticsService.invalidateAnalyticsCache();
+
     // Log to AdminAuditLog
     await logAction({
-      adminId: req.admin._id,
+      adminId: req.admin?._id,
       action: auditAction,
       targetType: 'ITEM',
       targetId: item._id,
@@ -697,8 +783,29 @@ exports.moderateItem = async (req, res) => {
 exports.approveItem = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // 1. Try PostgreSQL first
+    try {
+      const pgCheck = await pgQuery('SELECT id, title, owner_id FROM items WHERE id = $1 LIMIT 1', [id]);
+      if (pgCheck?.rows?.[0]) {
+        const pgItem = pgCheck.rows[0];
+        await pgQuery("UPDATE items SET status = 'active', availability = 'Available', updated_at = NOW() WHERE id = $1", [id]);
+        clearAdminItemsCache();
+        adminDashboardService.invalidateDashboardCache();
+        adminAnalyticsService.invalidateAnalyticsCache();
+
+        return res.status(200).json({
+          success: true,
+          message: 'Item has been approved and published to the marketplace.',
+          item: pgItem
+        });
+      }
+    } catch (pgErr) {
+      console.warn('[approveItem] PG notice:', pgErr.message);
+    }
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid item ID format.' });
+      return res.status(404).json({ success: false, message: 'Item not found.' });
     }
 
     const item = await Item.findById(id);
@@ -712,8 +819,12 @@ exports.approveItem = async (req, res) => {
     item.rejectionReason = '';
     await item.save();
 
+    clearAdminItemsCache();
+    adminDashboardService.invalidateDashboardCache();
+    adminAnalyticsService.invalidateAnalyticsCache();
+
     await logAction({
-      adminId: req.admin._id,
+      adminId: req.admin?._id,
       action: 'ITEM_APPROVED',
       targetType: 'ITEM',
       targetId: item._id,
@@ -749,8 +860,28 @@ exports.rejectItem = async (req, res) => {
     const { id } = req.params;
     const { reason = '' } = req.body;
 
+    // 1. Try PostgreSQL first
+    try {
+      const pgCheck = await pgQuery('SELECT id, title, owner_id FROM items WHERE id = $1 LIMIT 1', [id]);
+      if (pgCheck?.rows?.[0]) {
+        const pgItem = pgCheck.rows[0];
+        await pgQuery("UPDATE items SET status = 'rejected', availability = 'Unavailable', updated_at = NOW() WHERE id = $1", [id]);
+        clearAdminItemsCache();
+        adminDashboardService.invalidateDashboardCache();
+        adminAnalyticsService.invalidateAnalyticsCache();
+
+        return res.status(200).json({
+          success: true,
+          message: 'Listing rejected.',
+          item: pgItem
+        });
+      }
+    } catch (pgErr) {
+      console.warn('[rejectItem] PG notice:', pgErr.message);
+    }
+
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: 'Invalid item ID format.' });
+      return res.status(404).json({ success: false, message: 'Item not found.' });
     }
 
     const item = await Item.findById(id);
@@ -763,6 +894,10 @@ exports.rejectItem = async (req, res) => {
     item.availability = 'Unavailable';
     item.rejectionReason = reason || 'Item does not meet platform reuse criteria.';
     await item.save();
+
+    clearAdminItemsCache();
+    adminDashboardService.invalidateDashboardCache();
+    adminAnalyticsService.invalidateAnalyticsCache();
 
     await logAction({
       adminId: req.admin._id,
