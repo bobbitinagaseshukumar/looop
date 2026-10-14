@@ -55,23 +55,18 @@ export const LandingPage = () => {
     const fetchItems = async () => {
       try {
         const res = await itemService.getItems({ limit: 24 });
-        if (isMounted && res?.items && res.items.length > 0) {
-          // Compare IDs so we don't trigger unnecessary re-renders if identical
-          setRealItems((prev) => {
-            if (!prev || prev.length === 0) return res.items;
-            const prevIds = prev.map((i) => i.id || i._id).join(',');
-            const newIds = res.items.map((i) => i.id || i._id).join(',');
-            return prevIds === newIds ? prev : res.items;
-          });
+        if (isMounted) {
+          const itemsFromDb = (res?.items || []).filter((i) => !itemService.isMockItem(i));
+          setRealItems(itemsFromDb);
           const metrics = getLiveImpactMetrics();
-          const books = res.items.filter((i) => (i.category || '').toLowerCase() === 'books').length;
-          const electronics = res.items.filter((i) => (i.category || '').toLowerCase() === 'electronics').length;
+          const books = itemsFromDb.filter((i) => (i.category || '').toLowerCase() === 'books').length;
+          const electronics = itemsFromDb.filter((i) => (i.category || '').toLowerCase() === 'electronics').length;
           setLiveImpact({
-            itemsReused: Math.max(metrics.itemsReused, res.items.length),
-            peopleHelped: Math.max(metrics.peopleHelped, res.items.length > 0 ? 1 : 0),
+            itemsReused: Math.max(metrics.itemsReused, itemsFromDb.length),
+            peopleHelped: Math.max(metrics.peopleHelped, itemsFromDb.length > 0 ? 1 : 0),
             booksShared: Math.max(metrics.booksShared, books),
             electronicsShared: Math.max(metrics.electronicsShared, electronics),
-            wasteAvoidedKg: Math.max(metrics.wasteAvoidedKg, Math.round(res.items.length * 2.5))
+            wasteAvoidedKg: Math.max(metrics.wasteAvoidedKg, Math.round(itemsFromDb.length * 2.5))
           });
         }
       } catch (err) {

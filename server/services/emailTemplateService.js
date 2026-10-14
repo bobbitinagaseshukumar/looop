@@ -29,10 +29,11 @@ function buildLooopEmailHtml({
 }) {
   const formattedName = recipientName ? recipientName.trim() : 'Member';
 
-  // Format OTP individual colored boxes in a single non-wrapping row
+  // Format OTP individual colored boxes in a single responsive row
   let otpBoxesHtml = '';
+  let otpDigitsArray = [];
   if (isOtp && otpCode) {
-    const rawDigits = String(otpCode).replace(/\D/g, '').split('');
+    otpDigitsArray = String(otpCode).replace(/\D/g, '').split('');
     const DIGIT_COLORS = [
       { bg: '#ecfdf5', border: '#10b981', color: '#047857', shadow: 'rgba(16, 185, 129, 0.22)' }, // 1: Emerald
       { bg: '#f0fdfa', border: '#14b8a6', color: '#0f766e', shadow: 'rgba(20, 184, 166, 0.22)' }, // 2: Teal
@@ -42,9 +43,9 @@ function buildLooopEmailHtml({
       { bg: '#fff1f2', border: '#f43f5e', color: '#be123c', shadow: 'rgba(244, 63, 94, 0.22)' }   // 6: Rose
     ];
 
-    otpBoxesHtml = rawDigits.map((digit, idx) => {
+    otpBoxesHtml = otpDigitsArray.map((digit, idx) => {
       const c = DIGIT_COLORS[idx % DIGIT_COLORS.length];
-      return `<td align="center" valign="middle" style="padding: 0; width: 42px; min-width: 42px; max-width: 42px; height: 52px; min-height: 52px; max-height: 52px; background-color: ${c.bg}; border: 2px solid ${c.border}; border-radius: 12px; font-size: 28px; font-weight: 800; color: ${c.color}; text-align: center; line-height: 50px; box-shadow: 0 4px 10px ${c.shadow}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'SF Mono', Consolas, monospace;">${digit}</td>`;
+      return `<td class="otp-digit-td" align="center" valign="middle" style="padding: 0; width: 36px; min-width: 28px; max-width: 38px; height: 46px; min-height: 42px; max-height: 48px; background-color: ${c.bg}; border: 2px solid ${c.border}; border-radius: 10px; font-size: 24px; font-weight: 800; color: ${c.color}; text-align: center; line-height: 44px; box-shadow: 0 2px 6px ${c.shadow}; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'SF Mono', Consolas, monospace;">${digit}</td>`;
     }).join('');
   }
 
@@ -60,18 +61,21 @@ function buildLooopEmailHtml({
 
   const cardHtml = isOtp
     ? `
-      <div style="background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #f0fdfa 100%); border: 2px solid #10b981; border-radius: 18px; padding: 26px 14px; text-align: center; margin: 24px 0; box-shadow: 0 6px 20px rgba(16, 185, 129, 0.14); overflow: hidden;">
-        <div style="display: inline-block; background-color: #065f46; color: #ffffff; font-size: 11px; font-weight: 800; padding: 5px 16px; border-radius: 20px; letter-spacing: 1.5px; text-transform: uppercase;">
+      <div class="looop-otp-card" style="background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 50%, #f0fdfa 100%); border: 2px solid #10b981; border-radius: 16px; padding: 22px 8px; text-align: center; margin: 22px 0; box-shadow: 0 4px 16px rgba(16, 185, 129, 0.12); box-sizing: border-box;">
+        <div style="display: inline-block; background-color: #065f46; color: #ffffff; font-size: 11px; font-weight: 800; padding: 5px 14px; border-radius: 20px; letter-spacing: 1.2px; text-transform: uppercase;">
           ONE-TIME VERIFICATION CODE
         </div>
-        <div style="margin: 20px auto 16px auto; text-align: center; white-space: nowrap !important;">
-          <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: separate; border-spacing: 6px; white-space: nowrap !important; table-layout: fixed;">
-            <tr style="white-space: nowrap !important;">
+        <div style="margin: 16px auto 10px auto; text-align: center; width: 100%;">
+          <table class="otp-table" role="presentation" border="0" cellpadding="0" cellspacing="0" align="center" style="margin: 0 auto; border-collapse: separate; border-spacing: 4px; table-layout: fixed; width: auto;">
+            <tr>
               ${otpBoxesHtml}
             </tr>
           </table>
         </div>
-        <div style="display: inline-block; background-color: #ffffff; border: 1.5px solid #a7f3d0; border-radius: 20px; padding: 5px 14px; font-size: 12px; font-weight: 700; color: #047857; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+        <div style="margin: 6px auto 14px auto; font-size: 13px; font-weight: 700; color: #047857; letter-spacing: 3px; font-family: -apple-system, BlinkMacSystemFont, 'SF Mono', Consolas, monospace;">
+          ${otpDigitsArray.join(' ')}
+        </div>
+        <div style="display: inline-block; background-color: #ffffff; border: 1.5px solid #a7f3d0; border-radius: 20px; padding: 4px 14px; font-size: 12px; font-weight: 700; color: #047857; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
           ⏱ Valid for ${otpExpiry || '10 minutes'}
         </div>
       </div>
@@ -110,9 +114,34 @@ function buildLooopEmailHtml({
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${headline}</title>
+  <style>
+    @media only screen and (max-width: 480px) {
+      .looop-container {
+        padding: 20px 8px !important;
+      }
+      .looop-otp-card {
+        padding: 16px 4px !important;
+        border-radius: 12px !important;
+      }
+      .otp-digit-td {
+        width: 32px !important;
+        min-width: 26px !important;
+        max-width: 34px !important;
+        height: 42px !important;
+        min-height: 38px !important;
+        max-height: 44px !important;
+        font-size: 20px !important;
+        line-height: 40px !important;
+        border-radius: 8px !important;
+      }
+      .otp-table {
+        border-spacing: 3px !important;
+      }
+    }
+  </style>
 </head>
 <body style="margin: 0; padding: 0; background-color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; color: #1e293b;">
-  <div style="max-width: 560px; margin: 0 auto; padding: 40px 24px; background-color: #ffffff;">
+  <div class="looop-container" style="max-width: 560px; width: 100%; margin: 0 auto; padding: 28px 12px; box-sizing: border-box; background-color: #ffffff;">
     
     <!-- LOOOP Header -->
     <div style="text-align: center; margin-bottom: 28px;">

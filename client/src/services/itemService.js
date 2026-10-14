@@ -1,14 +1,40 @@
 import api from './api';
-import { mockItems, mockCategories } from '../data/mockData';
+import { mockCategories } from '../data/mockData';
 import { recordImpactAction } from '../utils/communityImpactTracker';
 import { neonDb } from './neonDbService';
 
 const LOCAL_SHARED_ITEMS_KEY = 'looop_community_shared_items';
 
+export function isMockItem(item) {
+  if (!item) return false;
+  const id = String(item.id || item._id || '');
+  const title = String(item.title || '');
+  if (id.startsWith('itm_realme_') || id === 'itm_002' || id === 'itm_003' || id === 'itm_004' || id === 'itm_005' || id === 'itm_006' || id === 'itm_007' || id === 'itm_008') return true;
+  if (title.includes('Realme 12+') || title.includes('Modern Ergonomic Chair') || title.includes('Casio FX-991ES')) return true;
+  return false;
+}
+
+// Clean old mock items from local storage caches
+try {
+  localStorage.removeItem('looop_instant_products_cache_v1');
+  localStorage.removeItem('looop_instant_products_cache_v2');
+  localStorage.removeItem('looop_instant_products_cache_v3');
+  const stored = localStorage.getItem(LOCAL_SHARED_ITEMS_KEY);
+  if (stored) {
+    const list = JSON.parse(stored);
+    if (Array.isArray(list)) {
+      const clean = list.filter((i) => !isMockItem(i));
+      localStorage.setItem(LOCAL_SHARED_ITEMS_KEY, JSON.stringify(clean));
+    }
+  }
+} catch {}
+
 export function getLocalSharedItems() {
   try {
     const raw = localStorage.getItem(LOCAL_SHARED_ITEMS_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((i) => !isMockItem(i)) : [];
   } catch {
     return [];
   }
@@ -16,6 +42,7 @@ export function getLocalSharedItems() {
 
 export function saveLocalSharedItem(item) {
   try {
+    if (isMockItem(item)) return;
     const existing = getLocalSharedItems();
     const itemId = item._id || item.id;
     const filtered = existing.filter((i) => i.id !== itemId && i._id !== itemId);
@@ -48,51 +75,59 @@ export function normalizeImageUrl(img) {
   return urlStr;
 }
 
-const INSTANT_CACHE_KEY = 'looop_instant_products_cache_v3';
+const INSTANT_CACHE_KEY = 'looop_instant_products_cache_v4';
 const BROWSE_CACHE_KEY_PREFIX = 'looop_browse_cache_';
 let memoryItemsCache = null;
 const memoryBrowseCache = new Map();
 
 /**
- * Return cached items immediately for 0ms initial render
+ * Return cached items immediately for 0ms initial render.
+ * STRICT: Only returns items confirmed to exist in the database or locally shared items.
+ * If database is empty, returns empty array [] (never fake mock items).
  */
 export function getCachedItems(limit = 24) {
-  // 1. In-memory check (0.001 ms)
+  // 1. In-memory check
   if (memoryItemsCache && memoryItemsCache.length > 0) {
-    return memoryItemsCache.slice(0, limit);
+    const clean = memoryItemsCache.filter((i) => !isMockItem(i));
+    if (clean.length > 0) return clean.slice(0, limit);
   }
 
-  // 2. LocalStorage persistent check (0.1 ms)
+  // 2. LocalStorage persistent check
   try {
     const stored = localStorage.getItem(INSTANT_CACHE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        memoryItemsCache = parsed;
-        return parsed.slice(0, limit);
+        const clean = parsed.filter((i) => !isMockItem(i));
+        if (clean.length > 0) {
+          memoryItemsCache = clean;
+          return clean.slice(0, limit);
+        }
       }
     }
   } catch (err) {
     console.warn('[itemService] cache read error:', err);
   }
 
-  // 3. Instant baseline fallback (mockItems + localSharedItems) - ALWAYS READY on Frame 0
-  const localItems = getLocalSharedItems();
-  const baseline = [...localItems, ...mockItems].map((item) => ({
-    ...item,
-    id: item._id || item.id,
-    images: (item.images || []).map(normalizeImageUrl)
-  }));
-  memoryItemsCache = baseline;
-  try {
-    localStorage.setItem(INSTANT_CACHE_KEY, JSON.stringify(baseline.slice(0, 50)));
-  } catch {}
-  return baseline.slice(0, limit);
+  // 3. Persistent real local items from user
+  const localItems = getLocalSharedItems().filter((i) => !isMockItem(i));
+  if (localItems.length > 0) {
+    const baseline = localItems.map((item) => ({
+      ...item,
+      id: item._id || item.id,
+      images: (item.images || []).map(normalizeImageUrl)
+    }));
+    memoryItemsCache = baseline;
+    return baseline.slice(0, limit);
+  }
+
+  return [];
 }
 
 export function setCachedItems(items) {
-  if (!Array.isArray(items) || items.length === 0) return;
-  const normalized = items.map((item) => ({
+  if (!Array.isArray(items)) return;
+  const clean = items.filter((i) => !isMockItem(i));
+  const normalized = clean.map((item) => ({
     ...item,
     id: item._id || item.id,
     images: (item.images || []).map(normalizeImageUrl)
@@ -147,63 +182,58 @@ export const itemService = {
   discoverItems: async (params = {}) => {
     try {
       const response = await api.get('/items/discover', { params, timeout: 5000 });
-      if (response.data && response.data.success && Array.isArray(response.data.items) && response.data.items.length > 0) {
+      if (response.data && response.data.success && Array.isArray(response.data.items)) {
         const rawItems = response.data.items || [];
-        const items = rawItems.map((item) => ({
-          ...item,
-          id: item._id || item.id,
-          images: (item.images || []).map(normalizeImageUrl)
-        }));
+        const items = rawItems
+          .filter((item) => !isMockItem(item))
+          .map((item) => ({
+            ...item,
+            id: item._id || item.id,
+            images: (item.images || []).map(normalizeImageUrl)
+          }));
 
         // Merge any newly created local items by this customer to ensure zero latency
-        const localItems = getLocalSharedItems().filter((localItem) => {
-          if (params.category && params.category !== 'all') {
-            const cat = (localItem.category || '').toLowerCase();
-            const pCat = params.category.toLowerCase();
-            if (pCat === 'education' || pCat === 'books') {
-              if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
-            } else if (!cat.includes(pCat)) {
-              return false;
+        const localItems = getLocalSharedItems()
+          .filter((item) => !isMockItem(item))
+          .filter((localItem) => {
+            if (params.category && params.category !== 'all') {
+              const cat = (localItem.category || '').toLowerCase();
+              const pCat = params.category.toLowerCase();
+              if (pCat === 'education' || pCat === 'books') {
+                if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
+              } else if (!cat.includes(pCat)) {
+                return false;
+              }
             }
-          }
-          if (params.search && params.search.trim()) {
-            const q = params.search.trim().toLowerCase();
-            const t = (localItem.title || '').toLowerCase();
-            const d = (localItem.description || '').toLowerCase();
-            if (!t.includes(q) && !d.includes(q)) return false;
-          }
-          return true;
-        });
+            if (params.search && params.search.trim()) {
+              const q = params.search.trim().toLowerCase();
+              const t = (localItem.title || '').toLowerCase();
+              const d = (localItem.description || '').toLowerCase();
+              if (!t.includes(q) && !d.includes(q)) return false;
+            }
+            return true;
+          });
 
-        if (localItems.length > 0) {
-          const itemMap = new Map();
-          items.forEach((i) => {
-            const key = i.id || i._id;
-            if (key) itemMap.set(key, i);
-          });
-          localItems.forEach((i) => {
-            const key = i.id || i._id;
-            if (key && !itemMap.has(key)) {
-              itemMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
-            }
-          });
-          const combined = Array.from(itemMap.values());
-          return {
-            success: true,
-            items: combined.slice(0, params.limit || 12),
-            total: Math.max(response.data.total || 0, combined.length),
-            page: response.data.page || 1,
-            totalPages: Math.ceil(Math.max(response.data.total || 0, combined.length) / (params.limit || 12)) || 1,
-            limit: response.data.limit || 12
-          };
-        }
+        const itemMap = new Map();
+        items.forEach((i) => {
+          const key = i.id || i._id;
+          if (key) itemMap.set(key, i);
+        });
+        localItems.forEach((i) => {
+          const key = i.id || i._id;
+          if (key && !itemMap.has(key)) {
+            itemMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
+          }
+        });
+        const combined = Array.from(itemMap.values());
+        setCachedItems(combined);
 
         return {
           success: true,
-          items,
-          total: response.data.total || items.length,
+          items: combined.slice(0, params.limit || 12),
+          total: Math.max(response.data.total ?? combined.length, combined.length),
           page: response.data.page || 1,
-          totalPages: response.data.totalPages || 1,
+          totalPages: Math.ceil(Math.max(response.data.total ?? combined.length, combined.length) / (params.limit || 12)) || 1,
           limit: response.data.limit || 12
         };
       }
@@ -241,35 +271,47 @@ export const itemService = {
       }
     }
 
-    const normalizedApi = apiItems.map((item) => ({
-      ...item,
-      id: item._id || item.id,
-      images: (item.images || []).map(normalizeImageUrl)
-    }));
+    const normalizedApi = apiItems
+      .filter((i) => !isMockItem(i))
+      .map((item) => ({
+        ...item,
+        id: item._id || item.id,
+        images: (item.images || []).map(normalizeImageUrl)
+      }));
+
+    const normalizedNeon = directNeonItems
+      .filter((i) => !isMockItem(i))
+      .map((item) => ({
+        ...item,
+        id: item._id || item.id,
+        images: (item.images || []).map(normalizeImageUrl)
+      }));
 
     // Merge persistent local items matching active filters
-    const localItems = getLocalSharedItems().filter((localItem) => {
-      if (params.category && params.category !== 'all') {
-        const cat = (localItem.category || '').toLowerCase();
-        const pCat = params.category.toLowerCase();
-        if (pCat === 'education' || pCat === 'books') {
-          if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
-        } else if (!cat.includes(pCat)) {
-          return false;
+    const localItems = getLocalSharedItems()
+      .filter((i) => !isMockItem(i))
+      .filter((localItem) => {
+        if (params.category && params.category !== 'all') {
+          const cat = (localItem.category || '').toLowerCase();
+          const pCat = params.category.toLowerCase();
+          if (pCat === 'education' || pCat === 'books') {
+            if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
+          } else if (!cat.includes(pCat)) {
+            return false;
+          }
         }
-      }
-      if (params.search && params.search.trim()) {
-        const q = params.search.trim().toLowerCase();
-        const t = (localItem.title || '').toLowerCase();
-        const d = (localItem.description || '').toLowerCase();
-        if (!t.includes(q) && !d.includes(q)) return false;
-      }
-      return true;
-    });
+        if (params.search && params.search.trim()) {
+          const q = params.search.trim().toLowerCase();
+          const t = (localItem.title || '').toLowerCase();
+          const d = (localItem.description || '').toLowerCase();
+          if (!t.includes(q) && !d.includes(q)) return false;
+        }
+        return true;
+      });
 
     const combinedMap = new Map();
     // 1. Direct Neon items from PostgreSQL database
-    directNeonItems.forEach((i) => combinedMap.set(i.id || i._id, { ...i, images: (i.images || []).map(normalizeImageUrl) }));
+    normalizedNeon.forEach((i) => combinedMap.set(i.id || i._id, i));
     // 2. Persistent local items from customer browser
     localItems.forEach((i) => {
       const key = i.id || i._id;
@@ -281,11 +323,8 @@ export const itemService = {
     normalizedApi.forEach((i) => combinedMap.set(i.id || i._id, i));
 
     let allItems = Array.from(combinedMap.values());
-    if (allItems.length === 0) {
-      allItems = getCachedItems(params.limit || 24);
-    } else {
-      setCachedItems(allItems);
-    }
+    // STRICT: Only save real confirmed database items to cache. If DB has 0 items, cache is []
+    setCachedItems(allItems);
 
     return {
       items: allItems.slice(0, params.limit || 12),
@@ -302,15 +341,16 @@ export const itemService = {
   getNearbyItems: async (params = {}) => {
     try {
       const response = await api.get('/items/nearby', { params, timeout: 4000 });
-      return response.data;
+      const raw = response.data?.items || (Array.isArray(response.data) ? response.data : []);
+      return raw.filter((i) => !isMockItem(i));
     } catch {
       try {
         const neonRes = await neonDb.getAllItems({ limit: 8 });
-        if (neonRes && neonRes.items && neonRes.items.length > 0) {
-          return neonRes.items;
+        if (neonRes && Array.isArray(neonRes.items)) {
+          return neonRes.items.filter((i) => !isMockItem(i));
         }
       } catch {}
-      return mockItems;
+      return [];
     }
   },
 
@@ -380,30 +420,13 @@ export const itemService = {
     }
 
     // 3. Check persistent local shared items
-    const localItems = getLocalSharedItems();
+    const localItems = getLocalSharedItems().filter((i) => !isMockItem(i));
     const localMatch = localItems.find((i) => i.id === id || i._id === id);
     if (localMatch) {
       return {
         ...localMatch,
         id: localMatch.id || localMatch._id,
         images: (localMatch.images || []).map(normalizeImageUrl)
-      };
-    }
-
-    // 4. Check mock items as last fallback
-    const cleanId = String(id || '').toLowerCase().trim();
-    const mockMatch = mockItems.find(
-      (i) =>
-        i.id === id ||
-        i._id === id ||
-        (i.slug && i.slug.toLowerCase() === cleanId) ||
-        (i.title && i.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') === cleanId)
-    );
-    if (mockMatch) {
-      return {
-        ...mockMatch,
-        id: mockMatch.id,
-        images: (mockMatch.images || []).map(normalizeImageUrl)
       };
     }
 
@@ -418,19 +441,16 @@ export const itemService = {
     try {
       const endpoint = id ? `/items/${id}/similar` : '/items/similar';
       const response = await api.get(endpoint, { params });
-      return response.data?.items || (Array.isArray(response.data) ? response.data : []);
+      const raw = response.data?.items || (Array.isArray(response.data) ? response.data : []);
+      return raw.filter((i) => !isMockItem(i));
     } catch {
-      let filtered = mockItems.filter((i) => i.id !== id && i._id !== id);
-      if (params.category) {
-        const catList = filtered.filter((i) => i.category === params.category);
-        if (catList.length > 0) filtered = catList;
-      }
-      filtered.sort((a, b) => {
-        const availA = a.availability === 'Available' || a.status === 'AVAILABLE' ? 1 : 0;
-        const availB = b.availability === 'Available' || b.status === 'AVAILABLE' ? 1 : 0;
-        return availB - availA;
-      });
-      return filtered.slice(0, params.limit || 8);
+      try {
+        const neonRes = await neonDb.getAllItems({ limit: params.limit || 8 });
+        if (neonRes && Array.isArray(neonRes.items)) {
+          return neonRes.items.filter((i) => i.id !== id && i._id !== id && !isMockItem(i));
+        }
+      } catch {}
+      return [];
     }
   },
 
@@ -477,7 +497,6 @@ export const itemService = {
         };
 
         saveLocalSharedItem(finalItem);
-        mockItems.unshift(finalItem);
         recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
 
         return {
@@ -522,7 +541,6 @@ export const itemService = {
         };
 
         saveLocalSharedItem(finalItem);
-        mockItems.unshift(finalItem);
         recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
 
         return {

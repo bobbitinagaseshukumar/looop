@@ -70,7 +70,7 @@ export const BrowsePage = () => {
   const [items, setItems] = useState(() => {
     const cachedBrowse = itemService.getCachedBrowseItems(searchParams.toString());
     if (cachedBrowse && cachedBrowse.items && cachedBrowse.items.length > 0) {
-      return cachedBrowse.items;
+      return cachedBrowse.items.filter((i) => !itemService.isMockItem(i));
     }
     return itemService.getCachedItems(12);
   });
@@ -237,15 +237,14 @@ export const BrowsePage = () => {
         limit: 12
       });
 
-      if (response && Array.isArray(response.items) && response.items.length > 0) {
-        setItems(response.items);
-        setTotalItems(response.total || response.items.length);
-        setTotalPages(response.totalPages || 1);
-        itemService.setCachedBrowseItems(searchParams.toString(), response);
-      } else if (response && response.items) {
-        setItems(response.items);
-        setTotalItems(response.total || 0);
-        setTotalPages(response.totalPages || 1);
+      if (response && Array.isArray(response.items)) {
+        const clean = response.items.filter((i) => !itemService.isMockItem(i));
+        setItems(clean);
+        setTotalItems(response.total !== undefined ? response.total : clean.length);
+        setTotalPages(response.totalPages || Math.ceil(clean.length / 12) || 1);
+        if (clean.length > 0) {
+          itemService.setCachedBrowseItems(searchParams.toString(), { ...response, items: clean });
+        }
       }
     } catch (err) {
       console.warn('Silent browse background fetch notice:', err);

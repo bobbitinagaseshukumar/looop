@@ -48,60 +48,7 @@ export const mockUsers = {
   }
 };
 
-export const mockItems = [
-  {
-    id: 'itm_realme_1791465161247',
-    _id: 'itm_realme_1791465161247',
-    title: 'Realme 12+ 5G (Pioneer Green, 8GB RAM, 256GB Storage)',
-    description: 'Brand new Realme 12+ 5G smartphone in excellent condition. Comes with original box, 67W SUPERVOOC fast charger, and clear case. Shared with community.',
-    category: 'electronics',
-    condition: 'like_new',
-    sharingType: 'give_away',
-    images: [
-      'https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?w=800&auto=format&fit=crop&q=80'
-    ],
-    location: 'Indiranagar 100ft Road, Bengaluru (~0.5 km)',
-    city: 'Bengaluru',
-    availability: 'Available',
-    status: 'AVAILABLE',
-    owner: {
-      id: 'usr-admin-01',
-      name: 'System Admin',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-      trustScore: 98,
-      rating: 5.0,
-      reviewsCount: 10
-    },
-    createdAt: new Date().toISOString(),
-    viewsCount: 1,
-    savesCount: 0
-  },
-  {
-    id: 'itm_002',
-    title: 'Modern Ergonomic Chair',
-    description: 'Comfortable mesh desk chair with adjustable lumbar support.',
-    category: 'furniture',
-    condition: 'good',
-    sharingType: 'borrow',
-    images: ['https://images.unsplash.com/photo-1580481072645-022f9a6d83d0?w=800&auto=format&fit=crop&q=80'],
-    location: 'Gachibowli, Hyderabad',
-    city: 'Hyderabad',
-    availability: 'Available',
-    status: 'AVAILABLE',
-    owner: {
-      id: 'usr-109',
-      name: 'Deepa Menon',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-      trustScore: 93,
-      rating: 4.7,
-      reviewsCount: 14,
-      responseRate: '1 hour'
-    },
-    createdAt: '2026-09-09T11:00:00Z',
-    viewsCount: 130,
-    savesCount: 19
-  }
-];
+export const mockItems = [];
 
 export const mockWantedItems = [
   {

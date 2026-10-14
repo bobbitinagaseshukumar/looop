@@ -7,7 +7,7 @@ import { formatLocation } from '../../utils/formatters';
 import { itemService } from '../../services/itemService';
 
 export const AmazonItemCarousel = ({ items = [] }) => {
-  const displayItems = items && items.length > 0 ? items : itemService.getCachedItems(12);
+  const displayItems = Array.isArray(items) ? items.filter((i) => !itemService.isMockItem(i)) : [];
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const carouselRef = useRef(null);
