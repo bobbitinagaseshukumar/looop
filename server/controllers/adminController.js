@@ -371,11 +371,20 @@ exports.updateUserStatus = async (req, res) => {
 // -------------------------------------------------------------
 // 4. ITEMS & MODERATION
 // -------------------------------------------------------------
+const adminItemsCache = new Map();
+const ADMIN_ITEMS_CACHE_TTL = 15000;
+
 exports.getItems = async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const skip = (page - 1) * limit;
+
+    const cacheKey = `items_${page}_${limit}_${req.query.search || ''}_${req.query.category || ''}_${req.query.sharingType || ''}_${req.query.status || ''}_${req.query.condition || ''}`;
+    const cached = adminItemsCache.get(cacheKey);
+    if (cached && (Date.now() - cached.timestamp) < ADMIN_ITEMS_CACHE_TTL) {
+      return res.status(200).json(cached.data);
+    }
 
     // 1. Primary PostgreSQL query
     try {
@@ -409,35 +418,37 @@ exports.getItems = async (req, res) => {
         params.push(req.query.condition.toLowerCase());
       }
 
-      const countSql = `SELECT COUNT(*)::int as total FROM items i ${whereSql};`;
-      const [countRes, dataRes] = await Promise.all([
-        pgQuery(countSql, params),
-        pgQuery(`
-          SELECT 
-            i.id, i.title, i.description, i.category, i.subcategory, i.brand, i.model,
-            i.images, i.sharing_type as "sharingType", i.condition, i.availability, i.status,
-            i.city, i.district, i.state, i.locality, i.approximate_address,
-            i.borrow_max_duration_days as "borrowMaxDurationDays",
-            i.borrow_max_duration_unit as "borrowMaxDurationUnit",
-            i.views_count as "viewsCount", i.saves_count as "savesCount",
-            i.created_at as "createdAt", i.updated_at as "updatedAt",
-            json_build_object(
-              'id', u.id,
-              '_id', u.id,
-              'name', COALESCE(u.name, 'Community Member'),
-              'email', COALESCE(u.email, ''),
-              'avatar', COALESCE(u.avatar, ''),
-              'trustScore', COALESCE(u.trust_score, 95)
-            ) as owner
-          FROM items i
-          LEFT JOIN users u ON i.owner_id = u.id
-          ${whereSql}
-          ORDER BY i.created_at DESC
-          LIMIT $${paramIdx++} OFFSET $${paramIdx++};
-        `, [...params, limit, skip])
-      ]);
+      const dataRes = await pgQuery(`
+        SELECT 
+          i.id, i.title, i.description, i.category, i.subcategory, i.brand, i.model,
+          i.images, i.sharing_type as "sharingType", i.condition, i.availability, i.status,
+          i.city, i.district, i.state, i.locality, i.approximate_address,
+          i.borrow_max_duration_days as "borrowMaxDurationDays",
+          i.borrow_max_duration_unit as "borrowMaxDurationUnit",
+          i.views_count as "viewsCount", i.saves_count as "savesCount",
+          i.created_at as "createdAt", i.updated_at as "updatedAt",
+          json_build_object(
+            'id', u.id,
+            '_id', u.id,
+            'name', COALESCE(u.name, 'Community Member'),
+            'email', COALESCE(u.email, ''),
+            'avatar', COALESCE(u.avatar, ''),
+            'trustScore', COALESCE(u.trust_score, 95)
+          ) as owner,
+          COUNT(*) OVER()::int as full_count
+        FROM items i
+        LEFT JOIN users u ON i.owner_id = u.id
+        ${whereSql}
+        ORDER BY i.created_at DESC
+        LIMIT $${paramIdx++} OFFSET $${paramIdx++};
+      `, [...params, limit, skip]);
 
-      const total = countRes?.rows?.[0]?.total || 0;
+      let total = dataRes?.rows?.[0]?.full_count;
+      if (total === undefined) {
+        const countRes = await pgQuery(`SELECT COUNT(*)::int as total FROM items i ${whereSql};`, params);
+        total = countRes?.rows?.[0]?.total || 0;
+      }
+
       const items = (dataRes?.rows || []).map(row => ({
         _id: row.id,
         id: row.id,
@@ -464,7 +475,7 @@ exports.getItems = async (req, res) => {
         updatedAt: row.updatedAt
       }));
 
-      return res.status(200).json({
+      const payload = {
         success: true,
         data: {
           items,
@@ -473,7 +484,10 @@ exports.getItems = async (req, res) => {
           total,
           totalPages: Math.ceil(total / limit) || 1
         }
-      });
+      };
+
+      adminItemsCache.set(cacheKey, { data: payload, timestamp: Date.now() });
+      return res.status(200).json(payload);
     } catch (pgErr) {
       console.warn('[Admin getItems] PostgreSQL notice, checking Mongo fallback:', pgErr.message);
     }

@@ -27,16 +27,44 @@ import Avatar from '../../components/common/Avatar';
 import Spinner from '../../components/common/Spinner';
 
 export const AdminUsersPage = () => {
-  const [users, setUsers] = useState([]);
-  const [total, setTotal] = useState(0);
+  const [users, setUsers] = useState(() => {
+    try {
+      const cached = localStorage.getItem('looop_admin_users_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [total, setTotal] = useState(() => {
+    try {
+      const cached = localStorage.getItem('looop_admin_users_total');
+      return cached ? parseInt(cached, 10) : 4;
+    } catch {
+      return 4;
+    }
+  });
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [roleCounts, setRoleCounts] = useState({ all: 5, customers: 1, admins: 4, active: 5, suspended: 0 });
-  const [isLoading, setIsLoading] = useState(true);
+  const [roleCounts, setRoleCounts] = useState(() => {
+    try {
+      const cached = localStorage.getItem('looop_admin_users_counts');
+      return cached ? JSON.parse(cached) : { all: 4, customers: 0, admins: 4, active: 4, suspended: 0 };
+    } catch {
+      return { all: 4, customers: 0, admins: 4, active: 4, suspended: 0 };
+    }
+  });
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      const cached = localStorage.getItem('looop_admin_users_cache');
+      return !cached || JSON.parse(cached).length === 0;
+    } catch {
+      return true;
+    }
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [notification, setNotification] = useState(null);
 
@@ -68,11 +96,19 @@ export const AdminUsersPage = () => {
         status: statusFilter
       });
       if (res?.success) {
-        setUsers(res.data.users || []);
+        const uList = res.data.users || [];
+        setUsers(uList);
         setTotal(res.data.total || 0);
         setTotalPages(res.data.totalPages || 1);
         if (res.data.counts) {
           setRoleCounts(res.data.counts);
+          try { localStorage.setItem('looop_admin_users_counts', JSON.stringify(res.data.counts)); } catch {}
+        }
+        if (page === 1 && !search && !roleFilter && !statusFilter) {
+          try {
+            localStorage.setItem('looop_admin_users_cache', JSON.stringify(uList));
+            localStorage.setItem('looop_admin_users_total', String(res.data.total || 0));
+          } catch {}
         }
       }
     } catch (err) {
@@ -88,12 +124,13 @@ export const AdminUsersPage = () => {
 
   // Initial load and live background polling (checks every 8s for new registrations/logins)
   useEffect(() => {
-    fetchUsers(false);
+    const hasCache = users.length > 0 && page === 1 && !search && !roleFilter && !statusFilter;
+    fetchUsers(hasCache);
     const interval = setInterval(() => {
       fetchUsers(true);
     }, 8000);
     return () => clearInterval(interval);
-  }, [fetchUsers]);
+  }, [fetchUsers, users.length, page, search, roleFilter, statusFilter]);
 
   const handleOpenDetails = async (user) => {
     setSelectedUser(user);

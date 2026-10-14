@@ -23,16 +23,37 @@ import Spinner from '../../components/common/Spinner';
 
 export const AdminItemsPage = () => {
   const [activeTab, setActiveTab] = useState('items'); // 'items' | 'wanted'
-  const [items, setItems] = useState([]);
+  const [items, setItems] = useState(() => {
+    try {
+      const cached = localStorage.getItem('looop_admin_items_cache');
+      return cached ? JSON.parse(cached) : [];
+    } catch {
+      return [];
+    }
+  });
   const [wantedItems, setWantedItems] = useState([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState(() => {
+    try {
+      const cached = localStorage.getItem('looop_admin_items_total');
+      return cached ? parseInt(cached, 10) : 0;
+    } catch {
+      return 0;
+    }
+  });
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [sharingTypeFilter, setSharingTypeFilter] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      const cached = localStorage.getItem('looop_admin_items_cache');
+      return !cached || JSON.parse(cached).length === 0;
+    } catch {
+      return true;
+    }
+  });
   const [notification, setNotification] = useState(null);
 
   // Moderation Dialog State
@@ -46,9 +67,9 @@ export const AdminItemsPage = () => {
   const [detailsLoading, setDetailsLoading] = useState(false);
   const [fullDetails, setFullDetails] = useState(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (silent = false) => {
     try {
-      setIsLoading(true);
+      if (!silent) setIsLoading(true);
       if (activeTab === 'items') {
         const res = await adminService.getItems({
           page,
@@ -59,9 +80,16 @@ export const AdminItemsPage = () => {
           status: statusFilter
         });
         if (res?.success) {
-          setItems(res.data.items || []);
+          const list = res.data.items || [];
+          setItems(list);
           setTotal(res.data.total || 0);
           setTotalPages(res.data.totalPages || 1);
+          if (page === 1 && !search && !categoryFilter && !sharingTypeFilter && !statusFilter) {
+            try {
+              localStorage.setItem('looop_admin_items_cache', JSON.stringify(list));
+              localStorage.setItem('looop_admin_items_total', String(res.data.total || 0));
+            } catch {}
+          }
         }
       } else {
         const res = await adminService.getWantedItems({
@@ -79,14 +107,17 @@ export const AdminItemsPage = () => {
       }
     } catch (err) {
       console.error('Failed to load listings:', err);
-      setNotification({ type: 'error', message: 'Failed to retrieve listings from database.' });
+      if (items.length === 0) {
+        setNotification({ type: 'error', message: 'Failed to retrieve listings from database.' });
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [activeTab, page, search, categoryFilter, statusFilter, sharingTypeFilter]);
+  }, [activeTab, page, search, categoryFilter, statusFilter, sharingTypeFilter, items.length]);
 
   useEffect(() => {
-    fetchData();
+    const hasCache = items.length > 0 && page === 1 && !search && !categoryFilter && !sharingTypeFilter && !statusFilter;
+    fetchData(hasCache);
   }, [fetchData]);
 
   const handleOpenDetails = async (item) => {
