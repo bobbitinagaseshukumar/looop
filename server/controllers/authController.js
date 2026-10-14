@@ -265,7 +265,7 @@ exports.register = async (req, res) => {
       }
     }
 
-    // 2. Immediately upload user to Neon PostgreSQL database
+    // 2. Immediately upload user to Neon PostgreSQL database (required)
     try {
       await pgQuery(
         `INSERT INTO users (id, name, email, password, role, account_status, verified, trust_score, created_at, updated_at)
@@ -276,6 +276,20 @@ exports.register = async (req, res) => {
       console.log(`[Neon PostgreSQL] User registered (unverified) with ID: ${assignedId}`);
     } catch (pgErr) {
       console.error('[Neon PostgreSQL] Registration save error:', pgErr.message);
+      // Remove any legacy Mongo record so we don't orphan a user that isn't in the primary DB
+      if (mongoUser?._id) {
+        try { await User.deleteOne({ _id: mongoUser._id }); } catch {}
+      }
+      if (pgErr.code === '23505' || pgErr.code === '11000') {
+        return res.status(409).json({
+          success: false,
+          message: 'An account with this email already exists.'
+        });
+      }
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to create account. Please try again.'
+      });
     }
 
     // 3. Immediately clear dashboard and analytics caches so numbers increment right away
@@ -708,7 +722,10 @@ exports.googleAuth = async (req, res) => {
       if (pgRes.rows.length > 0) {
         user = pgRes.rows[0];
       }
-    } catch {}
+    } catch (pgErr) {
+      console.error('[googleAuth] PostgreSQL lookup error:', pgErr.message);
+      return res.status(500).json({ success: false, message: 'Google authentication failed.' });
+    }
 
     if (!user) {
       const newId = `usr_${Date.now()}`;
@@ -720,7 +737,13 @@ exports.googleAuth = async (req, res) => {
            ON CONFLICT (email) DO UPDATE SET avatar = $6`,
           [newId, cleanName, cleanEmail, tempHash, role, cleanAvatar]
         );
-      } catch {}
+      } catch (pgErr) {
+        console.error('[googleAuth] PostgreSQL insert error:', pgErr.message);
+        if (pgErr.code === '23505' || pgErr.code === '11000') {
+          return res.status(409).json({ success: false, message: 'An account with this email already exists.' });
+        }
+        return res.status(500).json({ success: false, message: 'Google authentication failed.' });
+      }
       user = { id: newId, _id: newId, name: cleanName, email: cleanEmail, role, avatar: cleanAvatar };
     }
 

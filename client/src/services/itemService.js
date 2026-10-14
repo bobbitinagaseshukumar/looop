@@ -367,96 +367,29 @@ export const itemService = {
    * @param {Object} itemData - Item listing payload
    */
   createItem: async (itemData) => {
-    let currentUser = {};
-    try {
-      currentUser = JSON.parse(localStorage.getItem('looop_user') || '{}');
-    } catch {}
+    const response = await api.post('/items', itemData);
+    if (response.data && response.data.success && response.data.item) {
+      const serverItem = response.data.item;
+      const finalItem = {
+        id: serverItem._id || serverItem.id,
+        _id: serverItem._id || serverItem.id,
+        ...serverItem
+      };
 
-    let serverItem = null;
-    try {
-      const response = await api.post('/items', itemData, { timeout: 6000 });
-      if (response.data && response.data.item) {
-        serverItem = response.data.item;
-      }
-    } catch (err) {
-      console.warn('[itemService.createItem] API attempt notice:', err.message);
-    }
+      saveLocalSharedItem(finalItem);
+      mockItems.unshift(finalItem);
+      recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
 
-    // Direct Neon Database Sync Guarantee:
-    // Ensures item is stored directly in Neon PostgreSQL Cloud Database even in serverless or offline dev modes
-    let directNeonItem = null;
-    try {
-      directNeonItem = await neonDb.saveItem(serverItem || itemData, currentUser);
-    } catch (neonErr) {
-      console.warn('[itemService.createItem] Direct Neon sync notice:', neonErr.message);
-    }
-
-    let finalItem = directNeonItem || (serverItem ? { id: serverItem._id || serverItem.id, _id: serverItem._id || serverItem.id, ...serverItem } : null);
-
-    if (!finalItem) {
-      // Create persistent structured item fallback
-      const newId = itemData.id || itemData._id || `item-${Date.now()}`;
-      const primaryImage = Array.isArray(itemData.images) && itemData.images.length > 0
-        ? (typeof itemData.images[0] === 'string' ? itemData.images[0] : itemData.images[0].url)
-        : 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
-
-      const normalizedImages = Array.isArray(itemData.images) && itemData.images.length > 0
-        ? itemData.images.map((img) => (typeof img === 'string' ? { url: img, isPrimary: true } : img))
-        : [{ url: primaryImage, isPrimary: true }];
-
-      const locCity = itemData.location?.city || (typeof itemData.location === 'string' ? itemData.location.split(',')[0] : 'Bengaluru');
-      const locLocality = itemData.location?.locality || '';
-
-      finalItem = {
-        id: newId,
-        _id: newId,
-        title: itemData.title,
-        description: itemData.description,
-        category: itemData.category,
-        subcategory: itemData.subcategory || 'General',
-        brand: itemData.brand || '',
-        model: itemData.model || '',
-        sharingType: itemData.sharingType || 'give_away',
-        condition: itemData.condition || 'good',
-        images: normalizedImages,
-        location: {
-          city: locCity,
-          locality: locLocality,
-          approximateAddress: `${locLocality ? locLocality + ', ' : ''}${locCity}`
-        },
-        locationCoordinates: {
-          type: 'Point',
-          coordinates: itemData.coordinates || [77.5946, 12.9716]
-        },
-        availability: 'Available',
-        status: 'active',
-        borrowSettings: itemData.borrowSettings || null,
-        exchangeDetails: itemData.exchangeDetails || null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        viewsCount: 1,
-        savesCount: 0,
-        owner: {
-          id: currentUser.id || currentUser._id || 'usr-local',
-          _id: currentUser.id || currentUser._id || 'usr-local',
-          name: currentUser.name || 'LOOOP Member',
-          email: currentUser.email || '',
-          avatar: currentUser.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
-          trustScore: currentUser.trustScore || 100,
-          rating: 5.0,
-          verified: true
-        }
+      return {
+        success: true,
+        message: response.data.message || 'Your item has been shared and saved to database!',
+        item: finalItem
       };
     }
 
-    saveLocalSharedItem(finalItem);
-    mockItems.unshift(finalItem);
-    recordImpactAction({ category: itemData.category, quantity: 1, type: itemData.sharingType || 'share' });
-
     return {
-      success: true,
-      message: 'Your item has been shared and saved to database!',
-      item: finalItem
+      success: false,
+      message: response.data?.message || 'Failed to publish item. Please try again.'
     };
   },
 
@@ -631,13 +564,8 @@ export const itemService = {
     try {
       const response = await api.patch(`/items/${id}/availability`, { availability });
       return response.data;
-    } catch {
-      const item = mockItems.find((i) => i.id === id || i._id === id);
-      if (item) {
-        item.availability = availability;
-        item.status = availability === 'Available' ? 'AVAILABLE' : 'UNAVAILABLE';
-      }
-      return { success: true, item: { id, availability } };
+    } catch (err) {
+      return { success: false, message: err?.message || 'Failed to update availability.' };
     }
   },
 
@@ -648,13 +576,8 @@ export const itemService = {
     try {
       const response = await api.delete(`/items/${id}`);
       return response.data;
-    } catch {
-      const itemIndex = mockItems.findIndex((i) => i.id === id || i._id === id);
-      if (itemIndex !== -1) {
-        mockItems[itemIndex].status = 'removed';
-        mockItems[itemIndex].availability = 'Unavailable';
-      }
-      return { success: true, message: 'Item removed from active discovery.' };
+    } catch (err) {
+      return { success: false, message: err?.message || 'Failed to remove listing.' };
     }
   },
 

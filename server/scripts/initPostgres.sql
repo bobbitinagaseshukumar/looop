@@ -84,12 +84,15 @@ CREATE TABLE IF NOT EXISTS items (
   borrow_max_duration_unit VARCHAR(20) DEFAULT 'days',
   borrow_notes VARCHAR(500) DEFAULT '',
   exchange_wanted_items VARCHAR(300) DEFAULT '',
+  specifications JSONB DEFAULT '[]'::jsonb,
   owner_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   views_count INT DEFAULT 0,
   saves_count INT DEFAULT 0,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+ALTER TABLE items ADD COLUMN IF NOT EXISTS specifications JSONB DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_items_cat_status_avail ON items(category, status, availability);
 CREATE INDEX IF NOT EXISTS idx_items_sharing_status ON items(sharing_type, status);
