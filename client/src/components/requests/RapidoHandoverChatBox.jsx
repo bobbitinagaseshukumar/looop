@@ -349,7 +349,11 @@ export const RapidoHandoverChatBox = ({
           overflow: 'hidden',
           display: 'flex',
           flexDirection: 'column',
-          maxHeight: '620px'
+          maxHeight: '620px',
+          width: '100%',
+          maxWidth: '100%',
+          minWidth: 0,
+          boxSizing: 'border-box'
         }}
       >
         {/* Top Header - WhatsApp Green Theme */}
@@ -362,7 +366,8 @@ export const RapidoHandoverChatBox = ({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '12px',
-            borderBottom: '2px solid #004D40'
+            borderBottom: '2px solid #004D40',
+            flexWrap: 'wrap'
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -614,6 +619,7 @@ export const RapidoHandoverChatBox = ({
             maxLength={1000}
             style={{
               flex: 1,
+              minWidth: 0,
               padding: '10px 14px',
               borderRadius: '24px',
               border: '1.5px solid #cbd5e1',
@@ -658,7 +664,8 @@ export const RapidoHandoverChatBox = ({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
-            gap: '10px'
+            gap: '10px',
+            flexWrap: 'wrap'
           }}
         >
           <div style={{ fontSize: '0.75rem', color: '#64748b' }}>
@@ -669,7 +676,7 @@ export const RapidoHandoverChatBox = ({
             size="sm"
             iconLeft={CheckCircle2}
             onClick={() => setIsTakenModalOpen(true)}
-            style={{ fontSize: '0.78rem', padding: '6px 14px', backgroundColor: '#059669' }}
+            style={{ fontSize: '0.78rem', padding: '6px 14px', backgroundColor: '#059669', flexShrink: 0 }}
           >
             Mark as Taken
           </Button>

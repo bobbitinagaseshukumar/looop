@@ -437,7 +437,7 @@ export const CustomerLayout = ({ children }) => {
       )}
 
       {/* 3. MAIN WORKSPACE CONTAINER */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, overflowX: 'hidden' }}>
         {/* TOPBAR HEADER */}
         <header
           style={{
@@ -617,8 +617,8 @@ export const CustomerLayout = ({ children }) => {
         </header>
 
         {/* MAIN DASHBOARD CONTENT VIEWPORT */}
-        <main style={{ flex: 1, padding: '1.75rem 2rem 5rem 2rem' }} className="customer-main-content">
-          <div style={{ maxWidth: '1280px', margin: '0 auto', width: '100%' }}>{children}</div>
+        <main style={{ flex: 1, padding: '1.75rem 2rem 5rem 2rem', minWidth: 0, width: '100%', boxSizing: 'border-box' }} className="customer-main-content">
+          <div style={{ maxWidth: '1280px', margin: '0 auto', width: '100%', minWidth: 0, boxSizing: 'border-box' }}>{children}</div>
         </main>
       </div>
 

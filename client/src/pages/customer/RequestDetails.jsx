@@ -302,7 +302,7 @@ export const RequestDetails = () => {
   const statusBanner = getStatusBannerContent();
 
   return (
-    <div style={{ maxWidth: '1050px', margin: '0 auto', paddingBottom: '4rem' }} className="request-details-page">
+    <div style={{ maxWidth: '1050px', width: '100%', margin: '0 auto', paddingBottom: '4rem', boxSizing: 'border-box' }} className="request-details-page">
       {/* 1. Breadcrumb */}
       <nav
         aria-label="Breadcrumb"
@@ -393,16 +393,18 @@ export const RequestDetails = () => {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: '1.8fr 1fr',
+          gridTemplateColumns: 'minmax(0, 1.8fr) minmax(0, 1fr)',
           gap: '1.5rem',
-          alignItems: 'start'
+          alignItems: 'start',
+          width: '100%',
+          minWidth: 0
         }}
         className="request-details-grid"
       >
         {/* ==================================================== */}
         {/* LEFT COLUMN: Main Request Information & Details      */}
         {/* ==================================================== */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', minWidth: 0, width: '100%' }}>
           {/* 3. Status Banner */}
           <div
             style={{
@@ -789,7 +791,7 @@ export const RequestDetails = () => {
         {/* ==================================================== */}
         {/* RIGHT COLUMN: Actions & Status Management Panel      */}
         {/* ==================================================== */}
-        <div style={{ position: 'sticky', top: '2rem' }}>
+        <div style={{ position: 'sticky', top: '2rem', minWidth: 0, width: '100%' }} className="request-details-right-col">
           <RequestActions
             request={request}
             isOwner={isOwner}
@@ -803,9 +805,17 @@ export const RequestDetails = () => {
       </div>
 
       <style>{`
-        @media (max-width: 860px) {
+        @media (max-width: 1100px) {
           .request-details-grid {
             grid-template-columns: 1fr !important;
+          }
+          .request-details-right-col {
+            position: static !important;
+          }
+        }
+        @media (max-width: 640px) {
+          .request-details-page {
+            padding-bottom: 2rem !important;
           }
         }
       `}</style>
