@@ -104,7 +104,7 @@ export const AdminLoginPage = () => {
       setOtpCountdown(60);
       addToast({
         title: 'Admin Verification Code Sent',
-        message: `A 6-digit OTP security code has been dispatched to ${cleanEmail} via Brevo Email.`,
+        message: `A 6-digit OTP security code has been sent to ${cleanEmail}.`,
         variant: 'info'
       });
       setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
@@ -440,7 +440,7 @@ export const AdminLoginPage = () => {
 
               <div style={{ textAlign: 'center', marginBottom: '1.25rem' }}>
                 <p style={{ fontSize: '0.85rem', color: '#cbd5e1', margin: '0 0 8px 0' }}>
-                  A 6-digit security code has been sent via <strong>Brevo Email</strong> to:
+                  A 6-digit security code has been sent to your email:
                 </p>
                 <div
                   style={{
@@ -592,7 +592,7 @@ export const AdminLoginPage = () => {
                       textDecoration: 'underline'
                     }}
                   >
-                    {isSendingOtp ? 'Sending...' : 'Resend Code via Brevo'}
+                    {isSendingOtp ? 'Sending...' : 'Resend Code'}
                   </button>
                 )}
               </div>

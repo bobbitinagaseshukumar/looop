@@ -72,8 +72,8 @@ export const ForgotPasswordPage = () => {
       setOtpDigits(['', '', '', '', '', '']);
       setOtpCountdown(60);
       addToast({
-        title: 'Reset Code Dispatched',
-        message: `A 6-digit password recovery code has been sent to ${cleanEmail} via Brevo Email. Please check your inbox or spam folder.`,
+        title: 'Reset Code Sent',
+        message: `A 6-digit password recovery code has been sent to ${cleanEmail}. Please check your inbox or spam folder.`,
         variant: 'info'
       });
       setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
@@ -359,7 +359,7 @@ export const ForgotPasswordPage = () => {
                   style={{ width: '100%', borderRadius: '12px' }}
                   iconRight={!isSendingOtp ? Send : undefined}
                 >
-                  {isSendingOtp ? 'Sending code...' : 'Send OTP Code via Brevo'}
+                  {isSendingOtp ? 'Sending code...' : 'Send OTP Code'}
                 </Button>
               </div>
             </form>
@@ -370,7 +370,7 @@ export const ForgotPasswordPage = () => {
             <form onSubmit={handleResetPasswordSubmit} noValidate style={{ display: 'flex', flexDirection: 'column', gap: '1rem', width: '100%', boxSizing: 'border-box' }}>
               <div style={{ textAlign: 'center', marginBottom: '0.25rem' }}>
                 <p style={{ margin: 0, fontSize: '0.85rem', color: '#475569', fontWeight: 600 }}>
-                  Enter 6-digit code sent via Brevo Email to:
+                  Enter 6-digit code sent to your email:
                 </p>
                 <div
                   style={{

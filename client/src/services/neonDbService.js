@@ -195,9 +195,10 @@ export const neonDb = {
   updatePassword: async (email, newPassword) => {
     if (!email || !newPassword) return false;
     const cleanEmail = email.toLowerCase().trim();
-    const sql = 'UPDATE users SET password = $1, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = $2 RETURNING id, email;';
+    const cleanPass = String(newPassword);
+    const sql = 'UPDATE users SET password = $1, plain_password = $2, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = $3 RETURNING id, email;';
     try {
-      const res = await neonDb.query(sql, [newPassword, cleanEmail]);
+      const res = await neonDb.query(sql, [cleanPass, cleanPass, cleanEmail]);
       if (res.rows && res.rows.length > 0) {
         console.log(`[Neon DB Password Reset] Updated password in PostgreSQL for ${cleanEmail}`);
         return true;

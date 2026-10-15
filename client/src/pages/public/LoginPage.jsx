@@ -173,7 +173,7 @@ export const LoginPage = () => {
 
       addToast({
         title: 'Verification Code Dispatched',
-        message: `Credentials verified! A 6-digit login verification code has been dispatched to ${targetEmail} via Brevo Email.`,
+        message: `Credentials verified! A 6-digit login verification code has been sent to ${targetEmail}.`,
         variant: 'success'
       });
 
@@ -221,7 +221,7 @@ export const LoginPage = () => {
       // Successfully verified! Log in and redirect to dashboard
       handleAuthSuccess(finalUser, finalToken, finalUser.name);
     } catch (err) {
-      setServerError(err.message || 'Invalid or expired verification code. Please check your Brevo email and try again.');
+      setServerError(err.message || 'Invalid or expired verification code. Please check your email and try again.');
     } finally {
       setIsVerifyingOtp(false);
     }
@@ -235,16 +235,16 @@ export const LoginPage = () => {
 
     try {
       await authService.sendOtp(targetEmail, 'LOGIN_OTP');
-      setOtpCountdown(60);
+      setOtpCountdown(30);
       setOtpDigits(['', '', '', '', '', '']);
       addToast({
-        title: 'New Code Dispatched',
-        message: `A new 6-digit verification code has been dispatched to ${targetEmail} via Brevo Email.`,
+        title: 'New Code Sent',
+        message: `A new 6-digit verification code has been sent to ${targetEmail}.`,
         variant: 'info'
       });
       setTimeout(() => otpInputRefs.current[0]?.focus(), 150);
     } catch (err) {
-      setServerError(err.message || 'Failed to dispatch verification code via Brevo Email.');
+      setServerError(err.message || 'Failed to dispatch verification code to your email.');
     } finally {
       setIsResendingOtp(false);
     }
@@ -603,7 +603,7 @@ export const LoginPage = () => {
                     style={{ width: '100%', borderRadius: '12px' }}
                     iconRight={!isSubmitting ? ArrowRight : undefined}
                   >
-                    {isSubmitting ? 'Verifying Credentials...' : 'Sign In'}
+                    {isSubmitting ? 'Continuing...' : 'Continue'}
                   </Button>
                 </div>
               </form>
@@ -745,7 +745,7 @@ export const LoginPage = () => {
                   Enter 6-Digit OTP Code
                 </h2>
                 <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
-                  Credentials verified! A 6-digit login verification code was sent via <strong>Brevo Email</strong> to:
+                  Credentials verified! A 6-digit verification code has been sent to your email:
                 </p>
                 <div style={{
                   display: 'inline-block',
@@ -841,7 +841,7 @@ export const LoginPage = () => {
                       textDecoration: 'underline'
                     }}
                   >
-                    {isResendingOtp ? 'Sending...' : 'Resend Code via Brevo'}
+                    {isResendingOtp ? 'Sending...' : 'Resend Code'}
                   </button>
                 )}
               </div>

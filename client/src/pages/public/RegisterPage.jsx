@@ -228,7 +228,7 @@ export const RegisterPage = () => {
       });
       setTimeout(() => inlineOtpRefs.current[0]?.focus(), 150);
     } catch (err) {
-      setInlineOtpError(err.message || 'Failed to dispatch verification code via Brevo Email. Please try again.');
+      setInlineOtpError(err.message || 'Failed to dispatch verification code to your email. Please try again.');
     } finally {
       setIsCheckingEmailDb(false);
     }
@@ -645,7 +645,7 @@ export const RegisterPage = () => {
                   Verify Your Email Address
                 </h2>
                 <p style={{ fontSize: '0.85rem', color: '#64748b', marginTop: '6px', lineHeight: 1.5 }}>
-                  We have dispatched a 6-digit verification code via <strong>Brevo Email</strong> to:
+                  We have sent a 6-digit verification code to your email:
                 </p>
                 <div style={{
                   display: 'inline-block',
@@ -744,7 +744,7 @@ export const RegisterPage = () => {
                       textDecoration: 'underline'
                     }}
                   >
-                    {isSendingOtp ? 'Sending...' : 'Resend Code via Brevo'}
+                    {isSendingOtp ? 'Sending...' : 'Resend Code'}
                   </button>
                 )}
               </div>
