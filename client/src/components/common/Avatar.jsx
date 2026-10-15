@@ -59,12 +59,13 @@ export const Avatar = ({
   const { dim, font } = sizeMap[size] || sizeMap.md;
   const [imgFailed, setImgFailed] = useState(false);
 
-  // Strict check: Ignore Unsplash or empty/null mock links
+  // Strict check: Ignore Unsplash, test-avatar or empty/null mock links
   const isRealPhoto = Boolean(
     src &&
     typeof src === 'string' &&
     src.trim() !== '' &&
     !src.includes('unsplash.com') &&
+    !src.includes('test-avatar') &&
     src !== '[object Object]' &&
     !imgFailed
   );
