@@ -47,7 +47,7 @@ export const RapidoHandoverChatBox = ({
   const [markingTaken, setMarkingTaken] = useState(false);
   const [isTaken, setIsTaken] = useState(request?.status === 'COMPLETED');
 
-  const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
   const pollTimerRef = useRef(null);
 
   const currentUserId = String(user?.id || user?._id || '');
@@ -67,8 +67,11 @@ export const RapidoHandoverChatBox = ({
 
   const partnerPhone = partner?.phone || request?.phone || '';
 
+  // Scroll ONLY the inner message container, never the browser window
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+    }
   };
 
   // Load conversation and messages
@@ -154,7 +157,16 @@ export const RapidoHandoverChatBox = ({
       if (activeId && !isTaken) {
         messageService.getMessages(activeId).then((res) => {
           if (res?.messages && res.messages.length > 0) {
-            setMessages(res.messages);
+            setMessages((prev) => {
+              if (prev.length === res.messages.length) {
+                const lastPrev = prev[prev.length - 1];
+                const lastNew = res.messages[res.messages.length - 1];
+                if ((lastPrev?.id || lastPrev?._id) === (lastNew?.id || lastNew?._id)) {
+                  return prev;
+                }
+              }
+              return res.messages;
+            });
           }
         }).catch(() => {});
       }
@@ -445,11 +457,13 @@ export const RapidoHandoverChatBox = ({
           </span>
         </div>
 
-        {/* Messages Scroll Area */}
+        {/* Messages Scroll Area - Scroll is strictly confined to this container */}
         <div
+          ref={messagesContainerRef}
           style={{
             flex: 1,
             overflowY: 'auto',
+            maxHeight: '360px',
             padding: '16px',
             backgroundColor: '#ECE5DD', // WhatsApp chat wallpaper background
             display: 'flex',
@@ -527,7 +541,6 @@ export const RapidoHandoverChatBox = ({
               );
             })
           )}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Quick Suggestion Chips */}

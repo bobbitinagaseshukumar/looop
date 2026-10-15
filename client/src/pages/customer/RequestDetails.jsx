@@ -75,13 +75,9 @@ export const RequestDetails = () => {
   }, [fetchRequest]);
 
   useEffect(() => {
-    if (window.location.hash === '#chat' && request) {
-      setTimeout(() => {
-        const el = document.getElementById('chat');
-        if (el) el.scrollIntoView({ behavior: 'smooth' });
-      }, 300);
-    }
-  }, [request]);
+    // Keep window at top when opening request details
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [id]);
 
   // Handle Accept
   const handleAccept = async () => {

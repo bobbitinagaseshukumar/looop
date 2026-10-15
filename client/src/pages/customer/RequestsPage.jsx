@@ -500,7 +500,7 @@ export const RequestsPage = () => {
 
                       {req.status === 'ACCEPTED' && (
                         <Link
-                          to={`/requests/${reqId}#chat`}
+                          to={`/requests/${reqId}`}
                           style={{ textDecoration: 'none' }}
                         >
                           <Button
@@ -742,7 +742,7 @@ export const RequestsPage = () => {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         {req.status === 'ACCEPTED' && (
                           <Link
-                            to={`/requests/${reqId}#chat`}
+                            to={`/requests/${reqId}`}
                             style={{ textDecoration: 'none' }}
                           >
                             <Button
