@@ -758,6 +758,25 @@ exports.acceptRequest = async (req, res) => {
       console.warn('[acceptRequest] PostgreSQL update notice:', pgUpErr.message);
     }
 
+    // 2.5 Ensure conversation is created in PostgreSQL between owner and requester
+    const convId = `conv_${cleanId}`;
+    try {
+      await pgQuery(`
+        INSERT INTO conversations (
+          id, request_id, item_id, participant_ids, status, created_at, updated_at
+        ) VALUES ($1, $2, $3, ARRAY[$4, $5], 'ACTIVE', NOW(), NOW())
+        ON CONFLICT (request_id) DO UPDATE SET status = 'ACTIVE', updated_at = NOW();
+      `, [
+        convId,
+        cleanId,
+        requestRow.item_id || null,
+        String(requestRow.owner_id),
+        String(requestRow.requester_id)
+      ]);
+    } catch (cErr) {
+      console.warn('[acceptRequest] Conversation creation notice:', cErr.message);
+    }
+
     // 3. Notify requester in PostgreSQL
     const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     try {
@@ -818,8 +837,9 @@ exports.acceptRequest = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: 'Request accepted successfully.',
-      request: { id: cleanId, _id: cleanId, status: 'ACCEPTED' }
+      message: 'Request accepted successfully. Handover coordination and messaging are now open.',
+      conversationId: convId,
+      request: { id: cleanId, _id: cleanId, status: 'ACCEPTED', conversationId: convId }
     });
   } catch (error) {
     console.error('Error in acceptRequest:', error);
@@ -950,8 +970,18 @@ exports.markItemTaken = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Request not found.' });
     }
 
-    const isOwner = String(requestRow.owner_id) === String(userId);
-    const isRequester = String(requestRow.requester_id) === String(userId);
+    const userEmail = req.user?.email ? req.user.email.toLowerCase().trim() : null;
+    let isOwner = String(requestRow.owner_id) === String(userId);
+    let isRequester = String(requestRow.requester_id) === String(userId);
+    if (!isOwner && !isRequester && userEmail) {
+      try {
+        const uRes = await pgQuery('SELECT id FROM users WHERE LOWER(email) = $1 LIMIT 1', [userEmail]);
+        if (uRes?.rows?.[0]?.id) {
+          if (String(uRes.rows[0].id) === String(requestRow.owner_id)) isOwner = true;
+          if (String(uRes.rows[0].id) === String(requestRow.requester_id)) isRequester = true;
+        }
+      } catch {}
+    }
 
     if (!isOwner && !isRequester && req.user?.role !== 'admin') {
       return res.status(403).json({
@@ -974,11 +1004,25 @@ exports.markItemTaken = async (req, res) => {
       if (requestRow.item_id) {
         await pgQuery("UPDATE items SET availability = 'Unavailable', status = 'reused', updated_at = NOW() WHERE id = $1", [requestRow.item_id]);
       }
-      // Delete chat messages for privacy
+      // Permanently delete all chat messages from database for privacy
       await pgQuery('DELETE FROM messages WHERE conversation_id IN (SELECT id FROM conversations WHERE request_id = $1)', [cleanId]);
+      await pgQuery("UPDATE conversations SET status = 'CLOSED', last_message_text = '[Item Taken - Chat securely deleted]' WHERE request_id = $1", [cleanId]);
     } catch (e) {
       console.warn('[markItemTaken] PostgreSQL sync notice:', e.message);
     }
+
+    // Real-time broadcast to close chat on both customers' screens immediately
+    try {
+      const io = getIO();
+      if (io) {
+        io.to(`conversation:conv_${cleanId}`).emit('item_taken', {
+          requestId: cleanId,
+          message: 'Item has been taken! Handover complete and chat messages have been permanently deleted.'
+        });
+        if (requestRow.owner_id) io.to(`user:${requestRow.owner_id}`).emit('item_taken', { requestId: cleanId });
+        if (requestRow.requester_id) io.to(`user:${requestRow.requester_id}`).emit('item_taken', { requestId: cleanId });
+      }
+    } catch {}
 
     return res.status(200).json({
       success: true,

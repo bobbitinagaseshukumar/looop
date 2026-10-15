@@ -74,6 +74,15 @@ export const RequestDetails = () => {
     fetchRequest();
   }, [fetchRequest]);
 
+  useEffect(() => {
+    if (window.location.hash === '#chat' && request) {
+      setTimeout(() => {
+        const el = document.getElementById('chat');
+        if (el) el.scrollIntoView({ behavior: 'smooth' });
+      }, 300);
+    }
+  }, [request]);
+
   // Handle Accept
   const handleAccept = async () => {
     if (loadingAction) return;
@@ -222,14 +231,13 @@ export const RequestDetails = () => {
     );
   }
 
-  // Derive roles
-  const userId = user?.id || user?._id;
-  const isRequester =
-    request.requester &&
-    (request.requester._id === userId || request.requester.id === userId || request.requester.email === user?.email);
-  const isOwner =
-    request.owner &&
-    (request.owner._id === userId || request.owner.id === userId || request.owner.email === user?.email);
+  // Derive roles robustly
+  const cleanUserId = String(user?.id || user?._id || '');
+  const requesterId = String(request.requester?._id || request.requester?.id || request.requester_id || request.requester || '');
+  const ownerId = String(request.owner?._id || request.owner?.id || request.owner_id || request.owner || '');
+
+  const isRequester = Boolean(cleanUserId && (requesterId === cleanUserId || (request.requester?.email && user?.email && request.requester.email.toLowerCase() === user.email.toLowerCase())));
+  const isOwner = Boolean(cleanUserId && (ownerId === cleanUserId || (request.owner?.email && user?.email && request.owner.email.toLowerCase() === user.email.toLowerCase())));
 
   const status = (request.status || 'PENDING').toUpperCase();
   const targetItem = request.item || request.wantedItem;
