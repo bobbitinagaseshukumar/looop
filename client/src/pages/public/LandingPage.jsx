@@ -51,6 +51,14 @@ export const LandingPage = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
+    try {
+      localStorage.removeItem('looop_community_shared_items');
+      localStorage.removeItem('looop_instant_products_cache_v5');
+      localStorage.removeItem('looop_instant_products_cache_v4');
+    } catch {}
+  }, []);
+
+  useEffect(() => {
     let isMounted = true;
     const fetchItems = async () => {
       try {

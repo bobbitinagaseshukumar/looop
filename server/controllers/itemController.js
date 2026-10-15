@@ -575,7 +575,7 @@ exports.createItem = async (req, res) => {
         id: resolvedOwnerId,
         _id: resolvedOwnerId,
         name: dbOwner?.name || req.user?.name || userName || 'LOOOP Member',
-        avatar: dbOwner?.avatar || req.user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+        avatar: dbOwner?.avatar || req.user?.avatar || '',
         trustScore: dbOwner?.trust_score || req.user?.trustScore || 98,
         rating: dbOwner?.rating || req.user?.rating || 5.0,
         responseRate: dbOwner?.response_rate || 'Under 1 hour',

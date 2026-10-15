@@ -18,30 +18,16 @@ try {
   localStorage.removeItem('looop_instant_products_cache_v2');
   localStorage.removeItem('looop_instant_products_cache_v3');
   localStorage.removeItem('looop_instant_products_cache_v4');
+  localStorage.removeItem('looop_instant_products_cache_v5');
+  localStorage.removeItem('looop_community_shared_items');
 } catch {}
 
 export function getLocalSharedItems() {
-  try {
-    const raw = localStorage.getItem(LOCAL_SHARED_ITEMS_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((i) => !isMockItem(i)) : [];
-  } catch {
-    return [];
-  }
+  return [];
 }
 
 export function saveLocalSharedItem(item) {
-  try {
-    if (isMockItem(item)) return;
-    const existing = getLocalSharedItems();
-    const itemId = item._id || item.id;
-    const filtered = existing.filter((i) => i.id !== itemId && i._id !== itemId);
-    const updated = [item, ...filtered];
-    localStorage.setItem(LOCAL_SHARED_ITEMS_KEY, JSON.stringify(updated.slice(0, 100)));
-  } catch (err) {
-    console.warn('[itemService] Failed to save local shared item:', err);
-  }
+  // STRICT: Do not save phantom local items to localStorage; rely exclusively on PostgreSQL database
 }
 
 /**
@@ -98,18 +84,6 @@ export function getCachedItems(limit = 24) {
     }
   } catch (err) {
     console.warn('[itemService] cache read error:', err);
-  }
-
-  // 3. Persistent real local items from user
-  const localItems = getLocalSharedItems().filter((i) => !isMockItem(i));
-  if (localItems.length > 0) {
-    const baseline = localItems.map((item) => ({
-      ...item,
-      id: item._id || item.id,
-      images: (item.images || []).map(normalizeImageUrl)
-    }));
-    memoryItemsCache = baseline;
-    return baseline.slice(0, limit);
   }
 
   return [];
@@ -184,48 +158,14 @@ export const itemService = {
             images: (item.images || []).map(normalizeImageUrl)
           }));
 
-        // Merge any newly created local items by this customer to ensure zero latency
-        const localItems = getLocalSharedItems()
-          .filter((item) => !isMockItem(item))
-          .filter((localItem) => {
-            if (params.category && params.category !== 'all') {
-              const cat = (localItem.category || '').toLowerCase();
-              const pCat = params.category.toLowerCase();
-              if (pCat === 'education' || pCat === 'books') {
-                if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
-              } else if (!cat.includes(pCat)) {
-                return false;
-              }
-            }
-            if (params.search && params.search.trim()) {
-              const q = params.search.trim().toLowerCase();
-              const t = (localItem.title || '').toLowerCase();
-              const d = (localItem.description || '').toLowerCase();
-              if (!t.includes(q) && !d.includes(q)) return false;
-            }
-            return true;
-          });
-
-        const itemMap = new Map();
-        items.forEach((i) => {
-          const key = i.id || i._id;
-          if (key) itemMap.set(key, i);
-        });
-        localItems.forEach((i) => {
-          const key = i.id || i._id;
-          if (key && !itemMap.has(key)) {
-            itemMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
-          }
-        });
-        const combined = Array.from(itemMap.values());
-        setCachedItems(combined);
+        setCachedItems(items);
 
         return {
           success: true,
-          items: combined.slice(0, params.limit || 12),
-          total: Math.max(response.data.total ?? combined.length, combined.length),
+          items: items.slice(0, params.limit || 12),
+          total: response.data.total ?? items.length,
           page: response.data.page || 1,
-          totalPages: Math.ceil(Math.max(response.data.total ?? combined.length, combined.length) / (params.limit || 12)) || 1,
+          totalPages: Math.ceil((response.data.total ?? items.length) / (params.limit || 12)) || 1,
           limit: response.data.limit || 12
         };
       }
@@ -279,39 +219,10 @@ export const itemService = {
         images: (item.images || []).map(normalizeImageUrl)
       }));
 
-    // Merge persistent local items matching active filters
-    const localItems = getLocalSharedItems()
-      .filter((i) => !isMockItem(i))
-      .filter((localItem) => {
-        if (params.category && params.category !== 'all') {
-          const cat = (localItem.category || '').toLowerCase();
-          const pCat = params.category.toLowerCase();
-          if (pCat === 'education' || pCat === 'books') {
-            if (!cat.includes('book') && !cat.includes('study') && !cat.includes('educat')) return false;
-          } else if (!cat.includes(pCat)) {
-            return false;
-          }
-        }
-        if (params.search && params.search.trim()) {
-          const q = params.search.trim().toLowerCase();
-          const t = (localItem.title || '').toLowerCase();
-          const d = (localItem.description || '').toLowerCase();
-          if (!t.includes(q) && !d.includes(q)) return false;
-        }
-        return true;
-      });
-
     const combinedMap = new Map();
     // 1. Direct Neon items from PostgreSQL database
     normalizedNeon.forEach((i) => combinedMap.set(i.id || i._id, i));
-    // 2. Persistent local items from customer browser
-    localItems.forEach((i) => {
-      const key = i.id || i._id;
-      if (key && !combinedMap.has(key)) {
-        combinedMap.set(key, { ...i, images: (i.images || []).map(normalizeImageUrl) });
-      }
-    });
-    // 3. API items from backend
+    // 2. API items from backend
     normalizedApi.forEach((i) => combinedMap.set(i.id || i._id, i));
 
     let allItems = Array.from(combinedMap.values());
