@@ -580,8 +580,8 @@ export const RequestDetails = () => {
             )}
           </Card>
 
-          {/* Rapido-Style Fast Handover & Pickup Coordination Chat */}
-          {(isOwner || isRequester) && (
+          {/* Handover & Pickup Coordination - Only shown once request is mutually ACCEPTED */}
+          {request?.status === 'ACCEPTED' && (isOwner || isRequester) && (
             <div style={{ marginBottom: '1.25rem' }}>
               <RapidoHandoverChatBox
                 request={request}

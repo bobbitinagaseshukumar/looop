@@ -48,9 +48,9 @@ export function saveLocalSharedItem(item) {
  * Normalize image URL for browser display
  */
 export function normalizeImageUrl(img) {
-  if (!img) return 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
+  if (!img) return '';
   const urlStr = typeof img === 'string' ? img : (img.url || '');
-  if (!urlStr) return 'https://images.unsplash.com/photo-1544716278-ca5e3f4abd8c?w=600&auto=format&fit=crop&q=80';
+  if (!urlStr || urlStr.includes('unsplash.com')) return '';
   if (urlStr.startsWith('data:') || urlStr.startsWith('http://') || urlStr.startsWith('https://')) {
     return urlStr;
   }
@@ -244,7 +244,7 @@ export const itemService = {
   getItems: async (params = {}) => {
     let apiItems = [];
     try {
-      const response = await api.get('/items', { params: { ...params, limit: params.limit || 50 }, timeout: 4000 });
+      const response = await api.get('/items', { params: { ...params, limit: params.limit || 50 }, timeout: 12000 });
       apiItems = response.data?.items || (Array.isArray(response.data) ? response.data : []);
     } catch (err) {
       console.warn('[itemService.getItems] API fetch notice:', err.message);

@@ -75,7 +75,7 @@ export const authService = {
               role: 'admin',
               trustScore: 100,
               rating: 5.0,
-              avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+              avatar: '',
               city: 'Guntur',
               state: 'Andhra Pradesh'
             }
@@ -98,7 +98,7 @@ export const authService = {
               role: 'admin',
               trustScore: 100,
               rating: 5.0,
-              avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+              avatar: '',
               city: 'Guntur',
               state: 'Andhra Pradesh'
             }
@@ -121,7 +121,7 @@ export const authService = {
               role: 'admin',
               trustScore: 100,
               rating: 5.0,
-              avatar: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80',
+              avatar: '',
               city: 'Guntur',
               state: 'Andhra Pradesh'
             }
@@ -194,7 +194,7 @@ export const authService = {
   googleLogin: async (googleUser) => {
     const cleanEmail = (googleUser.email || '').trim().toLowerCase();
     const cleanName = (googleUser.displayName || cleanEmail.split('@')[0]).trim();
-    const cleanAvatar = googleUser.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80';
+    const cleanAvatar = (googleUser.photoURL && !googleUser.photoURL.includes('unsplash.com')) ? googleUser.photoURL : '';
     const userId = googleUser.uid || `usr_${Date.now()}`;
 
     const isAdmin =
@@ -574,7 +574,7 @@ export const authService = {
       role: isAdmin ? 'admin' : 'customer',
       trustScore: 100,
       rating: 5.0,
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+      avatar: '',
       city: 'Guntur',
       state: 'Andhra Pradesh',
       createdAt: new Date().toISOString()

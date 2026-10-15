@@ -124,7 +124,7 @@ exports.login = async (req, res) => {
         password: hashedPassword,
         plainPassword: String(password),
         role: roleToAssign,
-        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+        avatar: '',
         accountStatus: 'active',
         trustScore: 100,
         rating: 5.0

@@ -172,11 +172,35 @@ exports.createRequest = async (req, res) => {
         { path: 'offeredItem', select: 'title images condition' }
       ]);
 
+      // Synchronize directly with Neon PostgreSQL
+      try {
+        const { query: pgQuery } = require('../config/postgres');
+        await pgQuery(`
+          INSERT INTO requests (id, item_id, requester_id, owner_id, type, message, expected_return_date, offered_item_id, status, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET
+            status = EXCLUDED.status,
+            updated_at = NOW();
+        `, [
+          newRequest._id.toString(),
+          item._id ? item._id.toString() : null,
+          userId.toString(),
+          (newRequest.owner?._id || item.owner).toString(),
+          resolvedType,
+          trimmedMessage,
+          parsedReturnDate,
+          validOfferedItem ? validOfferedItem.toString() : null,
+          'PENDING'
+        ]);
+      } catch (pgSyncErr) {
+        // Continue safely
+      }
+
       // Trigger real notification for item owner
       notificationService.notifyRequestReceived({
         request: newRequest,
         item,
-        actor: req.user
+        actor: newRequest.requester || req.user
       }).catch((err) => console.error('Notification trigger error:', err.message));
 
       // Auto-initialize chat conversation & initial message

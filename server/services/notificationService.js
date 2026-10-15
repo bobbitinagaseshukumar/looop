@@ -266,10 +266,14 @@ class NotificationService {
       // 4. Real-time dispatch via Socket.IO
       // If within quiet hours and not security, skip toast or suppress audio/toast
       const io = getIO();
-      if (io) {
-        io.to(`user:${recipient.toString()}`).emit('new_notification', {
+      if (io && normalizedRecipient) {
+        const targetUserId = normalizedRecipient.toString();
+        io.to(`user:${targetUserId}`).emit('new_notification', {
           notification: formatted,
           quietHoursSuppressed: inQuietHours && !isSecurityOrEssential
+        });
+        io.to(`user:${targetUserId}`).emit('notification_count_updated', {
+          recipient: targetUserId
         });
       }
 

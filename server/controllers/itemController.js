@@ -263,7 +263,7 @@ exports.createItem = async (req, res) => {
             genEmail,
             '$2a$10$abcdefghijklmnopqrstuv',
             effectiveRole,
-            req.user?.avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+            (req.user?.avatar && !req.user.avatar.includes('unsplash.com')) ? req.user.avatar : '',
             (locationObj.city || '').substring(0, 100),
             (locationObj.state || '').substring(0, 100),
             (locationObj.locality || '').substring(0, 100)
@@ -1473,7 +1473,7 @@ exports.discoverItems = async (req, res) => {
               _id: row.owner_id,
               id: row.owner_id,
               name: row.owner_name || 'LOOOP Member',
-              avatar: row.owner_avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120&auto=format&fit=crop&q=80',
+              avatar: (row.owner_avatar && !row.owner_avatar.includes('unsplash.com')) ? row.owner_avatar : '',
               trustScore: row.owner_trust_score || 95,
               rating: row.owner_rating || 5.0,
               reviewsCount: row.owner_reviews_count || 0,

@@ -54,9 +54,9 @@ export const LandingPage = () => {
     let isMounted = true;
     const fetchItems = async () => {
       try {
-        const res = await itemService.getItems({ limit: 24 });
-        if (isMounted) {
-          const itemsFromDb = (res?.items || []).filter((i) => !itemService.isMockItem(i));
+        const res = await itemService.discoverItems({ limit: 24 });
+        if (isMounted && res?.items) {
+          const itemsFromDb = (res.items || []).filter((i) => !itemService.isMockItem(i));
           setRealItems(itemsFromDb);
           const metrics = getLiveImpactMetrics();
           const books = itemsFromDb.filter((i) => (i.category || '').toLowerCase() === 'books').length;
@@ -119,9 +119,9 @@ export const LandingPage = () => {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 300px), 1fr))',
               alignItems: 'center',
-              gap: '3rem'
+              gap: 'clamp(1.5rem, 4vw, 3rem)'
             }}
           >
             {/* Left: Headline & Messaging */}
@@ -266,7 +266,7 @@ export const LandingPage = () => {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                minHeight: '440px'
+                minHeight: 'clamp(280px, 50vw, 440px)'
               }}
             >
               {/* Interactive 3D Torus Loop Canvas */}
@@ -382,6 +382,7 @@ export const LandingPage = () => {
                   maxWidth: '260px',
                   zIndex: 2
                 }}
+                className="hero-floating-card"
               >
                 <div
                   style={{
@@ -646,8 +647,8 @@ export const LandingPage = () => {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '2rem'
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))',
+              gap: 'clamp(1rem, 3vw, 2rem)'
             }}
           >
             {[
@@ -782,8 +783,8 @@ export const LandingPage = () => {
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-              gap: '1.75rem',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))',
+              gap: 'clamp(1rem, 2.5vw, 1.75rem)',
               textAlign: 'center'
             }}
           >
